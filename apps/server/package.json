@@ -1,0 +1,25 @@
+{
+  "name": "@metaverse2d/server",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/index.js",
+  "scripts": {
+    "prebuild": "npm run build --workspace @metaverse2d/shared",
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "prestart": "npm run build --workspace @metaverse2d/shared",
+    "start": "node dist/index.js",
+    "lint": "eslint \"src/**/*.ts\"",
+    "pretypecheck": "npm run build --workspace @metaverse2d/shared",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "express": "^4.21.1",
+    "socket.io": "^4.8.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.7.4",
+    "tsx": "^4.19.1"
+  }
+}

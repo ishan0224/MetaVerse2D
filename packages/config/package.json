@@ -1,0 +1,11 @@
+{
+  "name": "@metaverse2d/config",
+  "version": "0.1.0",
+  "private": true,
+  "main": "index.ts",
+  "types": "index.ts",
+  "scripts": {
+    "lint": "eslint \"**/*.ts\"",
+    "typecheck": "tsc --noEmit"
+  }
+}
