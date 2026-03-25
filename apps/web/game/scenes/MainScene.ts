@@ -6,6 +6,8 @@ import { Player } from '@/game/entities/Player';
 import { RemotePlayer } from '@/game/entities/RemotePlayer';
 import { InputHandler } from '@/game/systems/InputHandler';
 import { MultiplayerSystem } from '@/game/systems/MultiplayerSystem';
+import { ProximityVoiceSystem } from '@/game/systems/ProximityVoiceSystem';
+import { getRTCManager } from '@/network/rtc/rtcManager';
 
 const REMOTE_RENDER_DELAY_MS = 100;
 
@@ -14,6 +16,7 @@ export class MainScene extends Phaser.Scene {
   private player!: Player;
   private inputHandler!: InputHandler;
   private multiplayerSystem!: MultiplayerSystem;
+  private proximityVoiceSystem!: ProximityVoiceSystem;
   private readonly remotePlayers = new Map<string, RemotePlayer>();
 
   public constructor() {
@@ -50,11 +53,23 @@ export class MainScene extends Phaser.Scene {
     this.inputHandler = new InputHandler(this);
     this.multiplayerSystem = new MultiplayerSystem();
     this.multiplayerSystem.start();
+    this.proximityVoiceSystem = new ProximityVoiceSystem({
+      adapter: {
+        createConnection: async (targetId) => {
+          await getRTCManager().createConnection(targetId);
+        },
+        closeConnection: (targetId) => {
+          getRTCManager().closeConnection(targetId);
+        },
+      },
+      disconnectDebounceMs: 300,
+    });
 
     this.cameras.main.startFollow(this.player.getSprite());
 
     this.events.once('shutdown', () => {
       this.multiplayerSystem.stop();
+      this.proximityVoiceSystem.destroy();
       this.player.destroy();
 
       for (const remotePlayer of this.remotePlayers.values()) {
@@ -69,6 +84,8 @@ export class MainScene extends Phaser.Scene {
     const inputState = this.inputHandler.getInputState();
     this.multiplayerSystem.pushInput(inputState, delta);
     this.syncPlayersFromServer(performance.now());
+    const localPlayerId = this.multiplayerSystem.getLocalPlayer()?.id ?? null;
+    this.proximityVoiceSystem.update(localPlayerId, this.multiplayerSystem.getLocalNearbyPlayerIds());
   }
 
   private syncPlayersFromServer(nowMs: number): void {

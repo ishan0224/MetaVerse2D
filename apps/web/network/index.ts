@@ -1,7 +1,15 @@
 export {
   getClientPlayerId,
+  getRoomId,
   getSocketClient,
   listenToPlayerUpdates,
+  onWebRTCAnswer,
+  onWebRTCIceCandidate,
+  onWebRTCOffer,
   sendInput,
+  sendWebRTCAnswer,
+  sendWebRTCIceCandidate,
+  sendWebRTCOffer,
   setPlayerName,
+  setRoomId,
 } from '@/network/socket/socketClient';
