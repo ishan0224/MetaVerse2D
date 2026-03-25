@@ -26,9 +26,13 @@ The repository is organized as a monorepo with independent deployable apps (`web
 Primary flow: `React -> Game -> Network -> Server`
 Movement pipeline: `Input -> Movement Engine -> Separation System -> Broadcast`
 Client rendering pipeline: `Server Update -> Buffer -> Interpolation -> Render`
+Server flow: `Join -> Room Assignment -> Spawn -> Movement -> Broadcast (room only)`
+Server pipeline: `Movement -> Separation -> Proximity -> Broadcast`
+Voice flow: `Client A -> Offer -> Server -> Client B -> Answer -> Server -> Client A`
+Voice pipeline: `Proximity -> Voice Controller -> rtcManager -> WebRTC`
 
 1. React mounts and manages the game container lifecycle.
 2. Game layer (Phaser) handles rendering/runtime concerns only.
 3. Network layer owns transport clients and forwards events to backend.
-4. Server transport layer receives inputs, resolves movement and anti-overlap separation, then broadcasts authoritative state.
+4. Server transport layer receives inputs, resolves movement, anti-overlap separation, and proximity, then broadcasts authoritative state.
 5. Shared contracts in `packages/shared` define payload shapes across boundaries.

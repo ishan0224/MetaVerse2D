@@ -9,25 +9,47 @@ type PlayerState = {
   y: number;
   name: string;
   color: number;
+  roomId: string;
+  timestamp: number;
 };
 
 type PlayersUpdatePayload = {
   players: PlayerState[];
+  proximity: Record<string, string[]>;
+};
+
+export type WebRTCSessionDescription = {
+  type: 'offer' | 'answer' | 'pranswer' | 'rollback';
+  sdp?: string;
+};
+
+export type WebRTCIceCandidate = {
+  candidate?: string;
+  sdpMid?: string | null;
+  sdpMLineIndex?: number | null;
+  usernameFragment?: string | null;
 };
 
 type ServerToClientEvents = {
   'players:update': (payload: PlayersUpdatePayload) => void;
+  'webrtc:offer': (payload: { fromId: string; offer: WebRTCSessionDescription }) => void;
+  'webrtc:answer': (payload: { fromId: string; answer: WebRTCSessionDescription }) => void;
+  'webrtc:ice-candidate': (payload: { fromId: string; candidate: WebRTCIceCandidate }) => void;
 };
 
 type ClientToServerEvents = {
-  join: (payload: { name: string }) => void;
+  join: (payload: { name: string; roomId: string }) => void;
   move: (payload: { playerId: string; input: InputState; delta: number }) => void;
+  'webrtc:offer': (payload: { targetId: string; offer: WebRTCSessionDescription }) => void;
+  'webrtc:answer': (payload: { targetId: string; answer: WebRTCSessionDescription }) => void;
+  'webrtc:ice-candidate': (payload: { targetId: string; candidate: WebRTCIceCandidate }) => void;
 };
 
 type GameSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
 let socket: GameSocket | null = null;
 let playerName: string | null = null;
+let roomId: string | null = null;
 
 export function getSocketClient(): GameSocket {
   if (!socket) {
@@ -38,8 +60,8 @@ export function getSocketClient(): GameSocket {
 
     socket.on('connect', () => {
       console.log('connected to server');
-      if (playerName) {
-        socket?.emit('join', { name: playerName });
+      if (playerName && roomId) {
+        socket?.emit('join', { name: playerName, roomId });
       }
     });
 
@@ -53,6 +75,14 @@ export function getSocketClient(): GameSocket {
 
 export function setPlayerName(name: string): void {
   playerName = name;
+}
+
+export function setRoomId(nextRoomId: string): void {
+  roomId = nextRoomId;
+}
+
+export function getRoomId(): string | null {
+  return roomId;
 }
 
 export function sendInput(inputState: InputState, delta: number): void {
@@ -79,4 +109,46 @@ export function listenToPlayerUpdates(
 
 export function getClientPlayerId(): string | null {
   return getSocketClient().id ?? null;
+}
+
+export function sendWebRTCOffer(targetId: string, offer: WebRTCSessionDescription): void {
+  getSocketClient().emit('webrtc:offer', { targetId, offer });
+}
+
+export function sendWebRTCAnswer(targetId: string, answer: WebRTCSessionDescription): void {
+  getSocketClient().emit('webrtc:answer', { targetId, answer });
+}
+
+export function sendWebRTCIceCandidate(targetId: string, candidate: WebRTCIceCandidate): void {
+  getSocketClient().emit('webrtc:ice-candidate', { targetId, candidate });
+}
+
+export function onWebRTCOffer(
+  callback: (payload: { fromId: string; offer: WebRTCSessionDescription }) => void,
+): () => void {
+  const client = getSocketClient();
+  client.on('webrtc:offer', callback);
+  return () => {
+    client.off('webrtc:offer', callback);
+  };
+}
+
+export function onWebRTCAnswer(
+  callback: (payload: { fromId: string; answer: WebRTCSessionDescription }) => void,
+): () => void {
+  const client = getSocketClient();
+  client.on('webrtc:answer', callback);
+  return () => {
+    client.off('webrtc:answer', callback);
+  };
+}
+
+export function onWebRTCIceCandidate(
+  callback: (payload: { fromId: string; candidate: WebRTCIceCandidate }) => void,
+): () => void {
+  const client = getSocketClient();
+  client.on('webrtc:ice-candidate', callback);
+  return () => {
+    client.off('webrtc:ice-candidate', callback);
+  };
 }

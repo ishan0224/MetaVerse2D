@@ -1,43 +1,38 @@
 import type { InputState, Player } from '@metaverse2d/shared';
 import { getNextPosition, resolvePlayerCollisions } from '@metaverse2d/shared';
 
+import { RoomManager } from './roomManager';
+import { WORLD_BOUNDS } from './worldConfig';
+
 const PLAYER_SPEED = 220;
-const WORLD_BOUNDS = {
-  minX: 0,
-  maxX: 2400,
-  minY: 0,
-  maxY: 1600,
-} as const;
-const SPAWN_ORIGIN = {
-  x: 512,
-  y: 288,
-} as const;
-const SPAWN_STEP = 48;
 const PLAYER_COLORS = [0x3b82f6, 0xf97316, 0x10b981, 0xeab308];
 const PLAYER_COLLISION_DISTANCE = 28;
 const PLAYER_MAX_PUSH_PER_UPDATE = 2.25;
 
 export class PlayerManager {
   private readonly players = new Map<string, Player>();
+  private readonly roomManager = new RoomManager();
 
-  public addPlayer(id: string, name: string): Player {
-    const playerIndex = this.players.size;
-    const spawnOffset = playerIndex * SPAWN_STEP;
+  public addPlayer(id: string, name: string, roomId: string, spawnX: number, spawnY: number): Player {
+    const playerIndex = this.getPlayersInRoom(roomId).length;
     const player: Player = {
       id,
-      x: Math.min(WORLD_BOUNDS.maxX, SPAWN_ORIGIN.x + spawnOffset),
-      y: Math.min(WORLD_BOUNDS.maxY, SPAWN_ORIGIN.y + spawnOffset),
+      x: clamp(spawnX, WORLD_BOUNDS.minX, WORLD_BOUNDS.maxX),
+      y: clamp(spawnY, WORLD_BOUNDS.minY, WORLD_BOUNDS.maxY),
       name,
-      roomId: 'default',
+      roomId,
       color: PLAYER_COLORS[playerIndex % PLAYER_COLORS.length],
     };
 
     this.players.set(id, player);
+    this.roomManager.addPlayerToRoom(player, roomId);
     return player;
   }
 
-  public removePlayer(id: string): void {
+  public removePlayer(id: string): string | null {
+    const roomId = this.roomManager.removePlayerFromRoom(id);
     this.players.delete(id);
+    return roomId;
   }
 
   public updatePlayer(id: string, input: InputState, delta: number): Player | null {
@@ -61,17 +56,29 @@ export class PlayerManager {
     };
 
     this.players.set(id, updatedPlayer);
-    this.resolveCollisions();
+    this.resolveCollisions(existingPlayer.roomId);
 
     return this.players.get(id) ?? null;
   }
 
-  public getAllPlayers(): Player[] {
-    return Array.from(this.players.values());
+  public createRoom(roomId: string): void {
+    this.roomManager.createRoom(roomId);
   }
 
-  private resolveCollisions(): void {
-    const resolvedPlayers = resolvePlayerCollisions(this.getAllPlayers(), {
+  public getPlayersInRoom(roomId: string): Player[] {
+    const playerIds = this.roomManager.getPlayersInRoom(roomId);
+    return playerIds
+      .map((playerId) => this.players.get(playerId))
+      .filter((player): player is Player => Boolean(player));
+  }
+
+  public getPlayerRoomId(playerId: string): string | null {
+    return this.roomManager.getRoomForPlayer(playerId);
+  }
+
+  private resolveCollisions(roomId: string): void {
+    const roomPlayers = this.getPlayersInRoom(roomId);
+    const resolvedPlayers = resolvePlayerCollisions(roomPlayers, {
       minDistance: PLAYER_COLLISION_DISTANCE,
       maxPushPerUpdate: PLAYER_MAX_PUSH_PER_UPDATE,
     });

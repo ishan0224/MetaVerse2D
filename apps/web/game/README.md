@@ -13,3 +13,7 @@ Rules:
 - `game/utils/createNameLabel.ts` is the shared utility for both local and remote player label creation.
 - Remote players must be rendered via buffered interpolation (time-based smoothing) instead of direct snap-to-server position.
 - Local player remains immediate/responsive and is not interpolated.
+- Scene enforces world boundaries through server-authoritative clamped positions and world camera bounds.
+- Players exist in room context; only same-room snapshots are rendered.
+- `ProximityVoiceSystem` manages automatic voice connect/disconnect orchestration.
+- Proximity detection and voice transport are separated: proximity is consumed from server state, WebRTC stays in `network/rtc`.
