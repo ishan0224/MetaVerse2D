@@ -27,6 +27,7 @@ type IceCandidatePayload = {
 type JoinPayload = {
   name: string;
   roomId: string;
+  avatarUrl?: string;
 };
 
 type WebRTCOfferPayload = {
@@ -52,6 +53,7 @@ type PlayersUpdatePayload = {
     name: string;
     color: number;
     roomId: string;
+    avatarUrl?: string;
     timestamp: number;
   }>;
   proximity: NearbyPlayersMap;
@@ -79,6 +81,7 @@ function buildPlayersUpdatePayload(roomId: string): PlayersUpdatePayload {
       name: player.name,
       color: player.color,
       roomId: player.roomId,
+      avatarUrl: player.avatarUrl,
       timestamp: Date.now(),
     })),
     proximity,
@@ -110,6 +113,7 @@ export function registerSocketHandlers(io: SocketIOServer, socket: Socket): void
   socket.on(JOIN_EVENT, (payload: JoinPayload) => {
     const playerName = payload?.name?.trim();
     const roomId = normalizeRoomId(payload?.roomId);
+    const avatarUrl = normalizeAvatarUrl(payload?.avatarUrl);
     if (!playerName) {
       return;
     }
@@ -123,7 +127,14 @@ export function registerSocketHandlers(io: SocketIOServer, socket: Socket): void
 
     playerManager.createRoom(roomId);
     const spawnPosition = getSpawnPositionForRoom(playerManager.getPlayersInRoom(roomId));
-    const player = playerManager.addPlayer(socket.id, playerName, roomId, spawnPosition.x, spawnPosition.y);
+    const player = playerManager.addPlayer(
+      socket.id,
+      playerName,
+      roomId,
+      spawnPosition.x,
+      spawnPosition.y,
+      avatarUrl,
+    );
 
     socket.join(roomId);
     io.to(roomId).emit(PLAYERS_UPDATE_EVENT, buildPlayersUpdatePayload(player.roomId));
@@ -180,4 +191,22 @@ export function registerSocketHandlers(io: SocketIOServer, socket: Socket): void
 function normalizeRoomId(roomId: string | undefined): string {
   const trimmed = roomId?.trim();
   return trimmed ? trimmed : DEFAULT_ROOM_ID;
+}
+
+function normalizeAvatarUrl(avatarUrl: string | undefined): string | undefined {
+  const trimmed = avatarUrl?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return undefined;
+    }
+
+    return parsed.toString();
+  } catch {
+    return undefined;
+  }
 }

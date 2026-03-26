@@ -10,3 +10,4 @@ Rules:
 - `RoomManager` handles player grouping and room membership lifecycle.
 - No global player state is broadcast; updates are room-scoped only.
 - Proximity system computes nearby players per room and includes it in authoritative room updates.
+- Player identity is server-authoritative and includes `name` plus optional `avatarUrl` (http/https only).

@@ -10,6 +10,7 @@ type PlayerState = {
   name: string;
   color: number;
   roomId: string;
+  avatarUrl?: string;
   timestamp: number;
 };
 
@@ -38,7 +39,7 @@ type ServerToClientEvents = {
 };
 
 type ClientToServerEvents = {
-  join: (payload: { name: string; roomId: string }) => void;
+  join: (payload: { name: string; roomId: string; avatarUrl?: string }) => void;
   move: (payload: { playerId: string; input: InputState; delta: number }) => void;
   'webrtc:offer': (payload: { targetId: string; offer: WebRTCSessionDescription }) => void;
   'webrtc:answer': (payload: { targetId: string; answer: WebRTCSessionDescription }) => void;
@@ -50,23 +51,30 @@ type GameSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 let socket: GameSocket | null = null;
 let playerName: string | null = null;
 let roomId: string | null = null;
+let playerAvatarUrl: string | null = null;
 
 export function getSocketClient(): GameSocket {
   if (!socket) {
     socket = io(webEnv.socketUrl, {
       autoConnect: false,
-      transports: ['websocket'],
+      transports: ['websocket', 'polling'],
     });
 
     socket.on('connect', () => {
-      console.log('connected to server');
+      const transport = socket?.io?.engine?.transport?.name ?? 'unknown';
+      console.log(`connected to server via ${transport}`);
       if (playerName && roomId) {
-        socket?.emit('join', { name: playerName, roomId });
+        socket?.emit('join', { name: playerName, roomId, avatarUrl: playerAvatarUrl ?? undefined });
       }
     });
 
     socket.on('disconnect', () => {
       console.log('disconnected from server');
+    });
+
+    socket.on('connect_error', (error) => {
+      const transport = socket?.io?.engine?.transport?.name ?? 'unknown';
+      console.error(`socket connect error (${transport})`, error.message);
     });
   }
 
@@ -79,6 +87,10 @@ export function setPlayerName(name: string): void {
 
 export function setRoomId(nextRoomId: string): void {
   roomId = nextRoomId;
+}
+
+export function setPlayerAvatarUrl(avatarUrl: string | null): void {
+  playerAvatarUrl = avatarUrl;
 }
 
 export function getRoomId(): string | null {

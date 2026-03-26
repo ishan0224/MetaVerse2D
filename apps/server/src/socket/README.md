@@ -7,3 +7,4 @@ Rules:
 - Delegate business rules to domain services.
 - Expose typed contracts from shared packages.
 - Broadcast authoritative updates to room-specific channels only.
+- On `join`, validate/sanitize optional avatar URL (`http`/`https` only) before passing to domain/player state.

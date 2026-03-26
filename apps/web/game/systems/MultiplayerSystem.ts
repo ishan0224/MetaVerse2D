@@ -9,6 +9,7 @@ type PlayerSnapshot = {
   name: string;
   color: number;
   roomId: string;
+  avatarUrl?: string;
   timestamp: number;
 };
 
@@ -20,6 +21,7 @@ type PlayersUpdatePayload = {
     name: string;
     color: number;
     roomId: string;
+    avatarUrl?: string;
     timestamp?: number;
   }>;
   proximity: Record<string, string[]>;

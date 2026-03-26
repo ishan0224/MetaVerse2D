@@ -7,6 +7,7 @@ import { RemotePlayer } from '@/game/entities/RemotePlayer';
 import { InputHandler } from '@/game/systems/InputHandler';
 import { MultiplayerSystem } from '@/game/systems/MultiplayerSystem';
 import { ProximityVoiceSystem } from '@/game/systems/ProximityVoiceSystem';
+import { setVoiceUIRemotePlayers } from '@/game/systems/voiceControlStore';
 import { getRTCManager } from '@/network/rtc/rtcManager';
 
 const REMOTE_RENDER_DELAY_MS = 100;
@@ -48,6 +49,7 @@ export class MainScene extends Phaser.Scene {
       y: PLAYER_CONFIG.spawnY,
       name: '',
       scene: this,
+      avatarUrl: undefined,
     });
 
     this.inputHandler = new InputHandler(this);
@@ -60,6 +62,15 @@ export class MainScene extends Phaser.Scene {
         },
         closeConnection: (targetId) => {
           getRTCManager().closeConnection(targetId);
+        },
+        setPeerVolume: (targetId, volume) => {
+          getRTCManager().setPeerVolume(targetId, volume);
+        },
+        setPeerMuted: (targetId, muted) => {
+          getRTCManager().setPeerMuted(targetId, muted);
+        },
+        setLocalMicEnabled: (enabled) => {
+          getRTCManager().setLocalMicEnabled(enabled);
         },
       },
       disconnectDebounceMs: 300,
@@ -84,8 +95,25 @@ export class MainScene extends Phaser.Scene {
     const inputState = this.inputHandler.getInputState();
     this.multiplayerSystem.pushInput(inputState, delta);
     this.syncPlayersFromServer(performance.now());
-    const localPlayerId = this.multiplayerSystem.getLocalPlayer()?.id ?? null;
-    this.proximityVoiceSystem.update(localPlayerId, this.multiplayerSystem.getLocalNearbyPlayerIds());
+    const localPlayerState = this.multiplayerSystem.getLocalPlayer();
+    const remotePlayers = this.multiplayerSystem.getRemotePlayers();
+    this.proximityVoiceSystem.update({
+      localPlayerId: localPlayerState?.id ?? null,
+      localPlayerPosition: localPlayerState
+        ? {
+            x: localPlayerState.x,
+            y: localPlayerState.y,
+          }
+        : null,
+      nearbyPlayerIds: this.multiplayerSystem.getLocalNearbyPlayerIds(),
+      remotePlayers,
+    });
+    setVoiceUIRemotePlayers(
+      remotePlayers.map((player) => ({
+        id: player.id,
+        name: player.name,
+      })),
+    );
   }
 
   private syncPlayersFromServer(nowMs: number): void {
@@ -94,6 +122,7 @@ export class MainScene extends Phaser.Scene {
       this.player.setPosition(localPlayerState.x, localPlayerState.y);
       this.player.setName(localPlayerState.name);
       this.player.setColor(localPlayerState.color);
+      this.player.setAvatarUrl(localPlayerState.avatarUrl);
       this.player.update();
     }
 
@@ -106,6 +135,7 @@ export class MainScene extends Phaser.Scene {
         existingRemotePlayer.addServerPosition(remoteState.x, remoteState.y, remoteState.timestamp);
         existingRemotePlayer.setName(remoteState.name);
         existingRemotePlayer.setColor(remoteState.color);
+        existingRemotePlayer.setAvatarUrl(remoteState.avatarUrl);
         continue;
       }
 
@@ -116,6 +146,7 @@ export class MainScene extends Phaser.Scene {
         timestamp: remoteState.timestamp,
         name: remoteState.name,
         color: remoteState.color,
+        avatarUrl: remoteState.avatarUrl,
         scene: this,
       });
 

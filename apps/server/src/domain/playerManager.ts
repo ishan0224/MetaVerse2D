@@ -13,7 +13,14 @@ export class PlayerManager {
   private readonly players = new Map<string, Player>();
   private readonly roomManager = new RoomManager();
 
-  public addPlayer(id: string, name: string, roomId: string, spawnX: number, spawnY: number): Player {
+  public addPlayer(
+    id: string,
+    name: string,
+    roomId: string,
+    spawnX: number,
+    spawnY: number,
+    avatarUrl?: string,
+  ): Player {
     const playerIndex = this.getPlayersInRoom(roomId).length;
     const player: Player = {
       id,
@@ -22,6 +29,7 @@ export class PlayerManager {
       name,
       roomId,
       color: PLAYER_COLORS[playerIndex % PLAYER_COLORS.length],
+      avatarUrl,
     };
 
     this.players.set(id, player);

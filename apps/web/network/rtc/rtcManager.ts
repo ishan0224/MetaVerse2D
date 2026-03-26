@@ -16,9 +16,12 @@ class RTCManager {
   private localStream: MediaStream | null = null;
   private readonly peerConnections = new Map<string, RTCPeerConnection>();
   private readonly remoteAudioElements = new Map<string, HTMLAudioElement>();
+  private readonly remoteAudioVolumes = new Map<string, number>();
+  private readonly remoteAudioMuted = new Map<string, boolean>();
   private readonly pendingIceCandidates = new Map<string, WebRTCIceCandidate[]>();
   private readonly unsubscribers: Array<() => void> = [];
   private initialized = false;
+  private localMicEnabled = false;
 
   public initialize(): void {
     if (this.initialized) {
@@ -122,7 +125,61 @@ class RTCManager {
       this.remoteAudioElements.delete(targetId);
     }
 
+    this.remoteAudioVolumes.delete(targetId);
+    this.remoteAudioMuted.delete(targetId);
     this.pendingIceCandidates.delete(targetId);
+  }
+
+  public setLocalMicEnabled(enabled: boolean): void {
+    this.localMicEnabled = enabled;
+    if (!this.localStream) {
+      return;
+    }
+
+    for (const track of this.localStream.getAudioTracks()) {
+      track.enabled = enabled;
+    }
+  }
+
+  public setPeerVolume(targetId: string, volume: number): void {
+    const clampedVolume = clamp(volume, 0, 1);
+    const previousVolume = this.remoteAudioVolumes.get(targetId);
+    if (typeof previousVolume === 'number' && Math.abs(previousVolume - clampedVolume) < 0.01) {
+      return;
+    }
+
+    this.remoteAudioVolumes.set(targetId, clampedVolume);
+    const audio = this.remoteAudioElements.get(targetId);
+    if (!audio) {
+      return;
+    }
+
+    audio.volume = clampedVolume;
+  }
+
+  public setPeerMuted(targetId: string, muted: boolean): void {
+    const previousMuted = this.remoteAudioMuted.get(targetId);
+    if (previousMuted === muted) {
+      return;
+    }
+
+    this.remoteAudioMuted.set(targetId, muted);
+    const audio = this.remoteAudioElements.get(targetId);
+    if (!audio) {
+      return;
+    }
+
+    audio.muted = muted;
+  }
+
+  public async requestMicrophoneAccess(): Promise<'granted' | 'blocked'> {
+    try {
+      await this.ensureLocalStream();
+      return 'granted';
+    } catch {
+      this.localStream = null;
+      return 'blocked';
+    }
   }
 
   public destroy(): void {
@@ -193,6 +250,9 @@ class RTCManager {
     }
 
     this.localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    for (const track of this.localStream.getAudioTracks()) {
+      track.enabled = this.localMicEnabled;
+    }
     return this.localStream;
   }
 
@@ -200,6 +260,8 @@ class RTCManager {
     const existingAudio = this.remoteAudioElements.get(targetId);
     if (existingAudio) {
       existingAudio.srcObject = stream;
+      existingAudio.volume = this.remoteAudioVolumes.get(targetId) ?? 1;
+      existingAudio.muted = this.remoteAudioMuted.get(targetId) ?? false;
       void existingAudio.play().catch(() => {
         return;
       });
@@ -211,6 +273,8 @@ class RTCManager {
     audioElement.setAttribute('playsinline', 'true');
     audioElement.srcObject = stream;
     audioElement.style.display = 'none';
+    audioElement.volume = this.remoteAudioVolumes.get(targetId) ?? 1;
+    audioElement.muted = this.remoteAudioMuted.get(targetId) ?? false;
     document.body.appendChild(audioElement);
 
     void audioElement.play().catch(() => {
@@ -253,6 +317,10 @@ class RTCManager {
       }
     }
   }
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
 }
 
 const rtcManager = new RTCManager();

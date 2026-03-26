@@ -5,4 +5,5 @@ export type Player = {
   name: string;
   roomId: string;
   color: number;
+  avatarUrl?: string;
 };

@@ -10,6 +10,7 @@ export {
   sendWebRTCAnswer,
   sendWebRTCIceCandidate,
   sendWebRTCOffer,
+  setPlayerAvatarUrl,
   setPlayerName,
   setRoomId,
 } from '@/network/socket/socketClient';
