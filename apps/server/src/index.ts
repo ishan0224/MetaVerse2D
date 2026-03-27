@@ -1,5 +1,9 @@
+import { loadServerEnvironment } from './core/loadEnvironment';
 import { createHttpServer } from './core/server';
+import { closeDatabaseConnection } from './db/client';
 import { attachSocketServer } from './socket';
+
+loadServerEnvironment();
 
 const DEFAULT_PORT = 4000;
 const port = Number(process.env.SERVER_PORT ?? DEFAULT_PORT);
@@ -31,7 +35,13 @@ function shutdown(signal: ShutdownSignal): void {
         return;
       }
 
-      process.exit(0);
+      void closeDatabaseConnection()
+        .catch((dbError) => {
+          console.error('error while closing database connection', dbError);
+        })
+        .finally(() => {
+          process.exit(0);
+        });
     });
   });
 }

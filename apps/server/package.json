@@ -9,17 +9,25 @@
     "build": "tsc -p tsconfig.json",
     "prestart": "npm run build --workspace @metaverse2d/shared",
     "start": "node dist/index.js",
+    "db:check": "tsx src/scripts/dbCheck.ts",
+    "db:generate": "drizzle-kit generate --config drizzle.config.ts",
+    "db:migrate": "drizzle-kit migrate --config drizzle.config.ts",
+    "db:studio": "drizzle-kit studio --config drizzle.config.ts",
     "lint": "eslint \"src/**/*.ts\"",
     "pretypecheck": "npm run build --workspace @metaverse2d/shared",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "drizzle-orm": "^0.44.7",
     "express": "^4.21.1",
+    "pg": "^8.16.3",
     "socket.io": "^4.8.0"
   },
   "devDependencies": {
     "@types/express": "^5.0.0",
     "@types/node": "^22.7.4",
+    "@types/pg": "^8.15.6",
+    "drizzle-kit": "^0.31.7",
     "tsx": "^4.19.1"
   }
 }

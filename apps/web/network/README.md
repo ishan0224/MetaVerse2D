@@ -9,11 +9,12 @@ Rules:
 - Keep side effects isolated and testable.
 - Multiplayer communication is input-based: clients send input state + delta, then consume authoritative player snapshots from server broadcasts.
 - Authoritative player snapshots include stable player identity/render fields (e.g., `id`, `x`, `y`, `color`) to keep cross-client visuals consistent.
-- On connection, clients send `join` payload with `{ name, roomId }` so server-authoritative identity and room assignment are established before movement updates.
-- Join payload includes `{ name, roomId, avatarUrl? }`; avatar URL is optional and must be absolute `http/https`.
+- On connection, clients send `join` payload with `{ name, worldId, roomId }`.
+- Join payload includes `{ name, worldId, roomId, avatarId?, avatarUrl? }`; `avatarId` is optional (`1-4`) for sprite-sheet character selection.
+- `avatarUrl` remains optional and must be absolute `http/https`.
 - For interpolation, snapshots are timestamped on client receipt and then consumed by the game interpolation layer.
-- Server room updates include proximity data (`playerId -> nearbyPlayerIds`) computed authoritatively on the backend.
-- Authoritative snapshots include optional `avatarUrl` so remote clients can render image avatars with fallback behavior.
+- Server updates are scoped to `(worldId, roomId)` and include proximity data (`playerId -> nearbyPlayerIds`) computed authoritatively within that scope.
+- Authoritative snapshots include optional `avatarId` and `avatarUrl` so remote clients can render the selected sprite avatar with image fallback behavior.
 - `rtcManager` handles WebRTC peer connections and media lifecycle in the network layer.
 - Socket.IO is used only for signaling (`webrtc:offer`, `webrtc:answer`, `webrtc:ice-candidate`), while audio flows peer-to-peer over WebRTC.
 - Voice connection targeting is automatic and proximity-driven by game orchestration; no manual peer selection UI is used at runtime.

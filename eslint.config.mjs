@@ -7,7 +7,14 @@ import globals from 'globals';
 
 export default [
   {
-    ignores: ['**/node_modules/**', '**/.next/**', '**/dist/**', '**/build/**', '**/coverage/**'],
+    ignores: [
+      '**/node_modules/**',
+      '**/.next/**',
+      '**/dist/**',
+      '**/build/**',
+      '**/coverage/**',
+      'MetaVerse 2D/**/*.tsx',
+    ],
   },
   js.configs.recommended,
   {
@@ -55,6 +62,14 @@ export default [
   },
   {
     files: ['**/*.config.js'],
+    languageOptions: {
+      globals: {
+        ...globals.node,
+      },
+    },
+  },
+  {
+    files: ['**/*.mjs'],
     languageOptions: {
       globals: {
         ...globals.node,

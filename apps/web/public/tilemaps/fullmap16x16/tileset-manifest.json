@@ -1,0 +1,62 @@
+[
+  {
+    "tilesetName": "floor",
+    "imageKey": "tileset-0-floor",
+    "imagePath": "/tilemaps/fullmap16x16/images/Floors_2_TILESET_A2_.png"
+  },
+  {
+    "tilesetName": "walls",
+    "imageKey": "tileset-1-walls",
+    "imagePath": "/tilemaps/fullmap16x16/images/Walls_2_TILESET_A4_.png"
+  },
+  {
+    "tilesetName": "floors2",
+    "imageKey": "tileset-2-floors2",
+    "imagePath": "/tilemaps/fullmap16x16/images/Floors_TILESET_A2_.png"
+  },
+  {
+    "tilesetName": "Walls2",
+    "imageKey": "tileset-3-walls2",
+    "imagePath": "/tilemaps/fullmap16x16/images/Walls_TILESET_A4_.png"
+  },
+  {
+    "tilesetName": "Interiors 23_768x768_TILESETS_B_C_D_E",
+    "imageKey": "tileset-4-interiors-23-768x768-tilesets-b-c-d-e",
+    "imagePath": "/tilemaps/fullmap16x16/images/Interiors_23_768x768_TILESETS_B_C_D_E.png"
+  },
+  {
+    "tilesetName": "music",
+    "imageKey": "tileset-5-music",
+    "imagePath": "/tilemaps/fullmap16x16/images/Interiors_4_768x768_TILESETS_B_C_D_E.png"
+  },
+  {
+    "tilesetName": "Interiors 18_768x768_TILESETS_B_C_D_E_Bookcases",
+    "imageKey": "tileset-6-interiors-18-768x768-tilesets-b-c-d-e-bookcases",
+    "imagePath": "/tilemaps/fullmap16x16/images/Interiors_18_768x768_TILESETS_B_C_D_E_Bookcases.png"
+  },
+  {
+    "tilesetName": "8_Gym",
+    "imageKey": "tileset-7-8-gym",
+    "imagePath": "/tilemaps/fullmap16x16/images/8_Gym.png"
+  },
+  {
+    "tilesetName": "2_LivingRoom",
+    "imageKey": "tileset-8-2-livingroom",
+    "imagePath": "/tilemaps/fullmap16x16/images/2_LivingRoom.png"
+  },
+  {
+    "tilesetName": "compuete",
+    "imageKey": "tileset-9-compuete",
+    "imagePath": "/tilemaps/fullmap16x16/images/Interiors_20_768x768_TILESETS_B_C_D_E_School_revamp.png"
+  },
+  {
+    "tilesetName": "4_Bedroom",
+    "imageKey": "tileset-10-4-bedroom",
+    "imagePath": "/tilemaps/fullmap16x16/images/4_Bedroom.png"
+  },
+  {
+    "tilesetName": "3_Bathroom",
+    "imageKey": "tileset-11-3-bathroom",
+    "imagePath": "/tilemaps/fullmap16x16/images/3_Bathroom.png"
+  }
+]

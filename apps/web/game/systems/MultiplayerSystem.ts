@@ -1,14 +1,24 @@
 import type { InputState } from '@metaverse2d/shared/types/InputState';
 
-import { getClientPlayerId, getRoomId, listenToPlayerUpdates, sendInput } from '@/network';
+import {
+  getClientPlayerId,
+  getRoomId,
+  getWorldId,
+  listenToPlayerUpdates,
+  sendInput,
+  setRoomId,
+  setWorldId,
+} from '@/network';
 
 type PlayerSnapshot = {
   id: string;
   x: number;
   y: number;
   name: string;
+  worldId: string;
   color: number;
   roomId: string;
+  avatarId?: number;
   avatarUrl?: string;
   timestamp: number;
 };
@@ -19,20 +29,24 @@ type PlayersUpdatePayload = {
     x: number;
     y: number;
     name: string;
+    worldId: string;
     color: number;
     roomId: string;
+    avatarId?: number;
     avatarUrl?: string;
     timestamp?: number;
   }>;
   proximity: Record<string, string[]>;
 };
 
+const INPUT_DELTA_STEP_MS = 100;
+
 export class MultiplayerSystem {
   private unsubscribe: (() => void) | null = null;
   private localPlayer: PlayerSnapshot | null = null;
   private readonly remotePlayers = new Map<string, PlayerSnapshot>();
   private proximityByPlayerId: Record<string, string[]> = {};
-  private activeRoomId: string | null = null;
+  private activeScopeId: string | null = null;
 
   public start(): void {
     this.unsubscribe = listenToPlayerUpdates((payload) => {
@@ -48,7 +62,20 @@ export class MultiplayerSystem {
   }
 
   public pushInput(input: InputState, delta: number): void {
-    sendInput(input, delta);
+    let remainingDelta = Math.max(delta, 0);
+    if (remainingDelta === 0) {
+      sendInput(input, 0);
+      return;
+    }
+
+    while (remainingDelta > 0) {
+      const stepDelta = Math.min(INPUT_DELTA_STEP_MS, remainingDelta);
+      sendInput(input, stepDelta);
+      remainingDelta -= stepDelta;
+      if (remainingDelta < 0.001) {
+        break;
+      }
+    }
   }
 
   public getLocalPlayer(): PlayerSnapshot | null {
@@ -73,25 +100,45 @@ export class MultiplayerSystem {
 
   private handlePlayersUpdate(payload: PlayersUpdatePayload): void {
     const clientPlayerId = getClientPlayerId();
+    const authoritativeLocalPlayer = clientPlayerId
+      ? payload.players.find((player) => player.id === clientPlayerId)
+      : undefined;
+    if (authoritativeLocalPlayer) {
+      if (authoritativeLocalPlayer.worldId !== getWorldId()) {
+        setWorldId(authoritativeLocalPlayer.worldId);
+      }
+
+      if (authoritativeLocalPlayer.roomId !== getRoomId()) {
+        setRoomId(authoritativeLocalPlayer.roomId);
+      }
+    }
+
+    const selectedWorldId = getWorldId();
     const selectedRoomId = getRoomId();
-    if (this.activeRoomId !== selectedRoomId) {
+    const selectedScopeId = selectedWorldId && selectedRoomId ? `${selectedWorldId}::${selectedRoomId}` : null;
+    if (this.activeScopeId !== selectedScopeId) {
       this.localPlayer = null;
       this.remotePlayers.clear();
       this.proximityByPlayerId = {};
-      this.activeRoomId = selectedRoomId;
+      this.activeScopeId = selectedScopeId;
     }
 
-    const fallbackTimestamp = performance.now();
     this.localPlayer = null;
     this.remotePlayers.clear();
     this.proximityByPlayerId = {};
 
     for (const player of payload.players) {
+      if (selectedWorldId && player.worldId !== selectedWorldId) {
+        continue;
+      }
+
       if (selectedRoomId && player.roomId !== selectedRoomId) {
         continue;
       }
 
-      const snapshotTimestamp = typeof player.timestamp === 'number' ? player.timestamp : fallbackTimestamp;
+      // Interpolation in the web client uses performance.now().
+      // Timestamp snapshots on client receipt to keep time domains consistent.
+      const snapshotTimestamp = performance.now();
       const nextSnapshot: PlayerSnapshot = {
         ...player,
         timestamp: snapshotTimestamp,

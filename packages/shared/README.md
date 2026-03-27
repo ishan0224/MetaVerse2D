@@ -8,4 +8,4 @@ Use this package for:
 - Contracts consumed by both frontend and backend.
 
 Current contract note:
-- `Player` includes identity fields (`id`, `name`, optional `avatarUrl`), room ownership (`roomId`), and authoritative state (`x`, `y`, etc.).
+- `Player` includes identity fields (`id`, `name`, `worldId`, `roomId`, optional `avatarUrl`), and authoritative state (`x`, `y`, etc.).

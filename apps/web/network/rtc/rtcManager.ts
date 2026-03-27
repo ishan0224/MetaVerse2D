@@ -198,6 +198,8 @@ class RTCManager {
       }
       this.localStream = null;
     }
+
+    this.pendingIceCandidates.clear();
   }
 
   private async getOrCreatePeerConnection(targetId: string): Promise<RTCPeerConnection> {

@@ -1,11 +1,9 @@
 'use client';
 
-import { useEffect, useSyncExternalStore } from 'react';
+import { useSyncExternalStore } from 'react';
 
 import {
-  cycleVoiceMode,
   getVoiceControlState,
-  setKeyboardPushToTalkPressed,
   setRemotePlayerMuted,
   setUIPushToTalkPressed,
   setVoiceMode,
@@ -22,54 +20,14 @@ export function VoiceControls() {
     getVoiceControlState,
   );
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (isTypingTarget(event)) {
-        return;
-      }
-
-      if (event.code === 'KeyM' && !event.repeat) {
-        cycleVoiceMode();
-        return;
-      }
-
-      if (event.code !== 'Space' || event.repeat) {
-        return;
-      }
-
-      setKeyboardPushToTalkPressed(true);
-    };
-
-    const onKeyUp = (event: KeyboardEvent) => {
-      if (event.code !== 'Space') {
-        return;
-      }
-
-      setKeyboardPushToTalkPressed(false);
-    };
-
-    const onWindowBlur = () => {
-      setKeyboardPushToTalkPressed(false);
-      setUIPushToTalkPressed(false);
-    };
-
-    window.addEventListener('keydown', onKeyDown);
-    window.addEventListener('keyup', onKeyUp);
-    window.addEventListener('blur', onWindowBlur);
-
-    return () => {
-      window.removeEventListener('keydown', onKeyDown);
-      window.removeEventListener('keyup', onKeyUp);
-      window.removeEventListener('blur', onWindowBlur);
-    };
-  }, []);
-
   const pushToTalkActive = state.keyboardPushToTalkPressed || state.uiPushToTalkPressed;
 
   return (
     <div className="pointer-events-none absolute bottom-4 left-4 z-20 w-[min(420px,calc(100vw-2rem))] rounded-lg border border-white/20 bg-black/70 p-3 text-xs text-zinc-100 backdrop-blur-sm">
       <div className="mb-2 font-semibold">Voice Controls</div>
-      <div className="mb-2 text-zinc-300">Press `M` to mute/unmute voice mode.</div>
+      <div className="mb-2 text-zinc-300">
+        Press `M` to cycle modes (Muted, Push To Talk, Always On).
+      </div>
 
       <div className="pointer-events-auto mb-3 flex flex-wrap gap-2">
         {VOICE_MODES.map((mode) => {
@@ -163,14 +121,4 @@ function formatMode(mode: VoiceMode): string {
     case 'ALWAYS_ON':
       return 'Always On';
   }
-}
-
-function isTypingTarget(event: KeyboardEvent): boolean {
-  const target = event.target;
-  if (!(target instanceof HTMLElement)) {
-    return false;
-  }
-
-  const tagName = target.tagName.toLowerCase();
-  return tagName === 'input' || tagName === 'textarea' || tagName === 'select' || target.isContentEditable;
 }

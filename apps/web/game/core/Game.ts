@@ -10,11 +10,15 @@ export function createGame(container: HTMLDivElement): Phaser.Game {
     type: Phaser.AUTO,
     width: GAME_WIDTH,
     height: GAME_HEIGHT,
+    pixelArt: true,
+    antialias: false,
+    roundPixels: true,
+    autoRound: true,
     parent: container,
     backgroundColor: '#0a0a0a',
     scene: [MainScene],
     scale: {
-      mode: Phaser.Scale.FIT,
+      mode: Phaser.Scale.ENVELOP,
       autoCenter: Phaser.Scale.CENTER_BOTH,
     },
   };

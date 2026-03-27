@@ -7,6 +7,11 @@ export class ProximitySystem {
 
   public updateRoom(roomId: string, players: Player[], threshold = DEFAULT_PROXIMITY_THRESHOLD): NearbyPlayersMap {
     const proximity = computeNearbyPlayers(players, threshold);
+    if (players.length === 0) {
+      this.roomProximity.delete(roomId);
+      return proximity;
+    }
+
     this.roomProximity.set(roomId, proximity);
     return proximity;
   }

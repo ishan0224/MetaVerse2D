@@ -8,8 +8,10 @@ type PlayerState = {
   x: number;
   y: number;
   name: string;
+  worldId: string;
   color: number;
   roomId: string;
+  avatarId?: number;
   avatarUrl?: string;
   timestamp: number;
 };
@@ -39,7 +41,13 @@ type ServerToClientEvents = {
 };
 
 type ClientToServerEvents = {
-  join: (payload: { name: string; roomId: string; avatarUrl?: string }) => void;
+  join: (payload: {
+    name: string;
+    worldId: string;
+    roomId: string;
+    avatarId?: number;
+    avatarUrl?: string;
+  }) => void;
   move: (payload: { playerId: string; input: InputState; delta: number }) => void;
   'webrtc:offer': (payload: { targetId: string; offer: WebRTCSessionDescription }) => void;
   'webrtc:answer': (payload: { targetId: string; answer: WebRTCSessionDescription }) => void;
@@ -50,7 +58,9 @@ type GameSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
 let socket: GameSocket | null = null;
 let playerName: string | null = null;
+let worldId: string | null = null;
 let roomId: string | null = null;
+let playerAvatarId: number | null = null;
 let playerAvatarUrl: string | null = null;
 
 export function getSocketClient(): GameSocket {
@@ -63,8 +73,14 @@ export function getSocketClient(): GameSocket {
     socket.on('connect', () => {
       const transport = socket?.io?.engine?.transport?.name ?? 'unknown';
       console.log(`connected to server via ${transport}`);
-      if (playerName && roomId) {
-        socket?.emit('join', { name: playerName, roomId, avatarUrl: playerAvatarUrl ?? undefined });
+      if (playerName && worldId && roomId) {
+        socket?.emit('join', {
+          name: playerName,
+          worldId,
+          roomId,
+          avatarId: playerAvatarId ?? undefined,
+          avatarUrl: playerAvatarUrl ?? undefined,
+        });
       }
     });
 
@@ -85,6 +101,10 @@ export function setPlayerName(name: string): void {
   playerName = name;
 }
 
+export function setWorldId(nextWorldId: string): void {
+  worldId = nextWorldId;
+}
+
 export function setRoomId(nextRoomId: string): void {
   roomId = nextRoomId;
 }
@@ -93,12 +113,24 @@ export function setPlayerAvatarUrl(avatarUrl: string | null): void {
   playerAvatarUrl = avatarUrl;
 }
 
+export function setPlayerAvatarId(avatarId: number): void {
+  playerAvatarId = avatarId;
+}
+
 export function getRoomId(): string | null {
   return roomId;
 }
 
+export function getWorldId(): string | null {
+  return worldId;
+}
+
 export function sendInput(inputState: InputState, delta: number): void {
   const client = getSocketClient();
+  if (!client.connected) {
+    return;
+  }
+
   const playerId = client.id ?? 'pending';
 
   client.emit('move', {

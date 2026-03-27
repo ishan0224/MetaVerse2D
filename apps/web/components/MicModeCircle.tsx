@@ -4,7 +4,11 @@ import { useSyncExternalStore } from 'react';
 
 import { getVoiceControlState, subscribeToVoiceControlState } from '@/game/systems/voiceControlStore';
 
-export function MicModeCircle() {
+type MicModeCircleProps = {
+  placement?: 'bottom-right' | 'top-right-below';
+};
+
+export function MicModeCircle({ placement = 'bottom-right' }: MicModeCircleProps) {
   const voiceState = useSyncExternalStore(
     subscribeToVoiceControlState,
     getVoiceControlState,
@@ -15,18 +19,30 @@ export function MicModeCircle() {
     voiceState.mode === 'PUSH_TO_TALK' &&
     (voiceState.keyboardPushToTalkPressed || voiceState.uiPushToTalkPressed);
 
+  const circleElement = (
+    <div
+      className={`flex h-11 w-11 items-center justify-center rounded-full border border-white/20 bg-black/60 text-zinc-100 shadow-md backdrop-blur transition-transform duration-150 ease-out sm:h-12 sm:w-12 ${
+        pushToTalkActive ? '-translate-y-1.5' : 'translate-y-0'
+      }`}
+      aria-label={getAriaLabel(voiceState.mode)}
+    >
+      {voiceState.mode === 'MUTED' ? <MutedMicIcon /> : null}
+      {voiceState.mode === 'ALWAYS_ON' ? <MicIcon /> : null}
+      {voiceState.mode === 'PUSH_TO_TALK' ? <WalkieTalkieIcon /> : null}
+    </div>
+  );
+
+  if (placement === 'top-right-below') {
+    return (
+      <div className="pointer-events-none absolute right-3 top-16 z-20 sm:right-4 sm:top-[4.5rem]">
+        {circleElement}
+      </div>
+    );
+  }
+
   return (
     <div className="pointer-events-none absolute bottom-4 right-3 z-20 sm:bottom-5 sm:right-4">
-      <div
-        className={`flex h-11 w-11 items-center justify-center rounded-full border border-black/20 bg-white/95 text-zinc-900 shadow-md backdrop-blur transition-transform duration-150 ease-out sm:h-12 sm:w-12 ${
-          pushToTalkActive ? '-translate-y-1.5' : 'translate-y-0'
-        }`}
-        aria-label={getAriaLabel(voiceState.mode)}
-      >
-        {voiceState.mode === 'MUTED' ? <MutedMicIcon /> : null}
-        {voiceState.mode === 'ALWAYS_ON' ? <MicIcon /> : null}
-        {voiceState.mode === 'PUSH_TO_TALK' ? <WalkieTalkieIcon /> : null}
-      </div>
+      {circleElement}
     </div>
   );
 }

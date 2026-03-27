@@ -5,6 +5,7 @@ import type { Server as SocketIOServer, Socket } from 'socket.io';
 import { PlayerManager } from '../domain/playerManager';
 import { ProximitySystem } from '../domain/proximitySystem';
 import { getSpawnPositionForRoom } from '../domain/spawnSystem';
+import { PlayerPersistenceService } from '../services/playerPersistenceService';
 
 type MovePayload = {
   playerId: string;
@@ -26,7 +27,9 @@ type IceCandidatePayload = {
 
 type JoinPayload = {
   name: string;
+  worldId: string;
   roomId: string;
+  avatarId?: number;
   avatarUrl?: string;
 };
 
@@ -51,8 +54,10 @@ type PlayersUpdatePayload = {
     x: number;
     y: number;
     name: string;
+    worldId: string;
     color: number;
     roomId: string;
+    avatarId?: number;
     avatarUrl?: string;
     timestamp: number;
   }>;
@@ -67,11 +72,12 @@ const WEBRTC_ANSWER_EVENT = 'webrtc:answer';
 const WEBRTC_ICE_CANDIDATE_EVENT = 'webrtc:ice-candidate';
 const playerManager = new PlayerManager();
 const proximitySystem = new ProximitySystem();
-const DEFAULT_ROOM_ID = 'lobby';
+const playerPersistenceService = new PlayerPersistenceService();
+const socketUserIds = new Map<string, string>();
 
-function buildPlayersUpdatePayload(roomId: string): PlayersUpdatePayload {
-  const roomPlayers = playerManager.getPlayersInRoom(roomId);
-  const proximity = proximitySystem.updateRoom(roomId, roomPlayers);
+function buildPlayersUpdatePayload(scopeId: string): PlayersUpdatePayload {
+  const roomPlayers = playerManager.getPlayersInScope(scopeId);
+  const proximity = proximitySystem.updateRoom(scopeId, roomPlayers);
 
   return {
     players: roomPlayers.map((player) => ({
@@ -79,8 +85,10 @@ function buildPlayersUpdatePayload(roomId: string): PlayersUpdatePayload {
       x: player.x,
       y: player.y,
       name: player.name,
+      worldId: player.worldId,
       color: player.color,
       roomId: player.roomId,
+      avatarId: player.avatarId,
       avatarUrl: player.avatarUrl,
       timestamp: Date.now(),
     })),
@@ -101,9 +109,9 @@ export function registerSocketHandlers(io: SocketIOServer, socket: Socket): void
       return;
     }
 
-    const sourceRoomId = playerManager.getPlayerRoomId(fromId);
-    const targetRoomId = playerManager.getPlayerRoomId(targetId);
-    if (!sourceRoomId || !targetRoomId || sourceRoomId !== targetRoomId) {
+    const sourceScopeId = playerManager.getPlayerScopeId(fromId);
+    const targetScopeId = playerManager.getPlayerScopeId(targetId);
+    if (!sourceScopeId || !targetScopeId || sourceScopeId !== targetScopeId) {
       return;
     }
 
@@ -111,34 +119,82 @@ export function registerSocketHandlers(io: SocketIOServer, socket: Socket): void
   };
 
   socket.on(JOIN_EVENT, (payload: JoinPayload) => {
+    void handleJoin(payload).catch((error) => {
+      console.error('[socket] join handler failed', {
+        event: 'join',
+        socketId: socket.id,
+        error,
+      });
+    });
+  });
+
+  const handleJoin = async (payload: JoinPayload): Promise<void> => {
     const playerName = payload?.name?.trim();
+    const worldId = normalizeWorldId(payload?.worldId);
     const roomId = normalizeRoomId(payload?.roomId);
+    const avatarId = normalizeAvatarId(payload?.avatarId);
     const avatarUrl = normalizeAvatarUrl(payload?.avatarUrl);
     if (!playerName) {
       return;
     }
 
-    const previousRoomId = playerManager.getPlayerRoomId(socket.id);
-    if (previousRoomId) {
-      playerManager.removePlayer(socket.id);
-      socket.leave(previousRoomId);
-      io.to(previousRoomId).emit(PLAYERS_UPDATE_EVENT, buildPlayersUpdatePayload(previousRoomId));
+    const existingUserId = socketUserIds.get(socket.id);
+    const existingPlayer = playerManager.getPlayer(socket.id);
+    if (existingUserId && existingPlayer) {
+      void playerPersistenceService.persistPlayerState({
+        socketId: socket.id,
+        userId: existingUserId,
+        x: existingPlayer.x,
+        y: existingPlayer.y,
+        worldId: existingPlayer.worldId,
+        roomId: existingPlayer.roomId,
+      });
     }
 
-    playerManager.createRoom(roomId);
-    const spawnPosition = getSpawnPositionForRoom(playerManager.getPlayersInRoom(roomId));
-    const player = playerManager.addPlayer(
+    const previousScopeId = playerManager.getPlayerScopeId(socket.id);
+    if (previousScopeId) {
+      playerManager.removePlayer(socket.id);
+      socket.leave(previousScopeId);
+      io.to(previousScopeId).emit(PLAYERS_UPDATE_EVENT, buildPlayersUpdatePayload(previousScopeId));
+    }
+
+    const persistedUser = await playerPersistenceService.getOrCreateUser(playerName, avatarUrl);
+    if (persistedUser) {
+      socketUserIds.set(socket.id, persistedUser.id);
+    } else {
+      socketUserIds.delete(socket.id);
+    }
+
+    const persistedState = persistedUser
+      ? await playerPersistenceService.getPlayerState(persistedUser.id, socket.id)
+      : null;
+    const resolvedWorldId = worldId;
+    const resolvedRoomId = roomId;
+    const scopeId = buildScopeId(resolvedWorldId, resolvedRoomId);
+    const playersInScope = playerManager.getPlayersInScope(scopeId);
+
+    const spawnPosition =
+      persistedState &&
+      persistedState.worldId === resolvedWorldId &&
+      persistedState.roomId === resolvedRoomId
+        ? { x: persistedState.x, y: persistedState.y }
+        : getSpawnPositionForRoom(resolvedWorldId, playersInScope);
+
+    playerManager.createScope(scopeId);
+    playerManager.addPlayer(
       socket.id,
       playerName,
-      roomId,
+      resolvedWorldId,
+      resolvedRoomId,
       spawnPosition.x,
       spawnPosition.y,
+      avatarId,
       avatarUrl,
     );
 
-    socket.join(roomId);
-    io.to(roomId).emit(PLAYERS_UPDATE_EVENT, buildPlayersUpdatePayload(player.roomId));
-  });
+    socket.join(scopeId);
+    io.to(scopeId).emit(PLAYERS_UPDATE_EVENT, buildPlayersUpdatePayload(scopeId));
+  };
 
   socket.on(MOVE_EVENT, (payload: MovePayload) => {
     if (!payload || !payload.input || typeof payload.delta !== 'number') {
@@ -154,15 +210,30 @@ export function registerSocketHandlers(io: SocketIOServer, socket: Socket): void
       return;
     }
 
-    io.to(updatedPlayer.roomId).emit(PLAYERS_UPDATE_EVENT, buildPlayersUpdatePayload(updatedPlayer.roomId));
+    const scopeId = buildScopeId(updatedPlayer.worldId, updatedPlayer.roomId);
+    io.to(scopeId).emit(PLAYERS_UPDATE_EVENT, buildPlayersUpdatePayload(scopeId));
   });
 
   socket.on('disconnect', () => {
-    const roomId = playerManager.removePlayer(socket.id);
+    const player = playerManager.getPlayer(socket.id);
+    const userId = socketUserIds.get(socket.id);
+    const scopeId = playerManager.removePlayer(socket.id);
     console.log(`user disconnected: ${socket.id}`);
+    socketUserIds.delete(socket.id);
 
-    if (roomId) {
-      io.to(roomId).emit(PLAYERS_UPDATE_EVENT, buildPlayersUpdatePayload(roomId));
+    if (player && userId) {
+      void playerPersistenceService.persistPlayerState({
+        socketId: socket.id,
+        userId,
+        x: player.x,
+        y: player.y,
+        worldId: player.worldId,
+        roomId: player.roomId,
+      });
+    }
+
+    if (scopeId) {
+      io.to(scopeId).emit(PLAYERS_UPDATE_EVENT, buildPlayersUpdatePayload(scopeId));
     }
   });
 
@@ -188,11 +259,6 @@ export function registerSocketHandlers(io: SocketIOServer, socket: Socket): void
   });
 }
 
-function normalizeRoomId(roomId: string | undefined): string {
-  const trimmed = roomId?.trim();
-  return trimmed ? trimmed : DEFAULT_ROOM_ID;
-}
-
 function normalizeAvatarUrl(avatarUrl: string | undefined): string | undefined {
   const trimmed = avatarUrl?.trim();
   if (!trimmed) {
@@ -209,4 +275,27 @@ function normalizeAvatarUrl(avatarUrl: string | undefined): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+function normalizeAvatarId(avatarId: number | undefined): number | undefined {
+  if (typeof avatarId !== 'number' || Number.isNaN(avatarId)) {
+    return undefined;
+  }
+
+  const rounded = Math.round(avatarId);
+  return Math.max(1, Math.min(4, rounded));
+}
+
+function normalizeWorldId(worldId: string | undefined): string {
+  const trimmed = worldId?.trim();
+  return trimmed || '1';
+}
+
+function normalizeRoomId(roomId: string | undefined): string {
+  const trimmed = roomId?.trim();
+  return trimmed || '1';
+}
+
+function buildScopeId(worldId: string, roomId: string): string {
+  return `${worldId}::${roomId}`;
 }

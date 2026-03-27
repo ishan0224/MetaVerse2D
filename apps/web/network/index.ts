@@ -2,6 +2,7 @@ export {
   getClientPlayerId,
   getRoomId,
   getSocketClient,
+  getWorldId,
   listenToPlayerUpdates,
   onWebRTCAnswer,
   onWebRTCIceCandidate,
@@ -10,7 +11,9 @@ export {
   sendWebRTCAnswer,
   sendWebRTCIceCandidate,
   sendWebRTCOffer,
+  setPlayerAvatarId,
   setPlayerAvatarUrl,
   setPlayerName,
   setRoomId,
+  setWorldId,
 } from '@/network/socket/socketClient';

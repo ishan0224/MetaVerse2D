@@ -1,6 +1,6 @@
 import * as Phaser from 'phaser';
 
-const textureLoadStatusByKey = new Map<string, Promise<boolean>>();
+const pendingTextureLoadsByKey = new Map<string, Promise<boolean>>();
 
 export function normalizeAvatarUrl(avatarUrl: string | null | undefined): string | null {
   const trimmed = avatarUrl?.trim();
@@ -34,10 +34,9 @@ export async function ensureAvatarTexture(
     return textureKey;
   }
 
-  let loadStatus = textureLoadStatusByKey.get(textureKey);
+  let loadStatus = pendingTextureLoadsByKey.get(textureKey);
   if (!loadStatus) {
-    loadStatus = loadTexture(scene, textureKey, normalized);
-    textureLoadStatusByKey.set(textureKey, loadStatus);
+    loadStatus = trackPendingTextureLoad(textureKey, loadTexture(scene, textureKey, normalized));
   }
 
   const didLoad = await loadStatus;
@@ -46,6 +45,14 @@ export async function ensureAvatarTexture(
   }
 
   return textureKey;
+}
+
+function trackPendingTextureLoad(textureKey: string, loadStatus: Promise<boolean>): Promise<boolean> {
+  const trackedLoad = loadStatus.finally(() => {
+    pendingTextureLoadsByKey.delete(textureKey);
+  });
+  pendingTextureLoadsByKey.set(textureKey, trackedLoad);
+  return trackedLoad;
 }
 
 function loadTexture(scene: Phaser.Scene, textureKey: string, avatarUrl: string): Promise<boolean> {
