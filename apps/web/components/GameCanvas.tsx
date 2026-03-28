@@ -6,8 +6,8 @@ import { CircularMinimap } from '@/components/CircularMinimap';
 import { JoinStatusOverlay } from '@/components/JoinStatusOverlay';
 import { MicModeCircle } from '@/components/MicModeCircle';
 import {
-  OnboardingOverlay,
   type OnboardingDraft,
+  OnboardingOverlay,
   type OnboardingStep,
 } from '@/components/OnboardingOverlay';
 import { TopRightStatusCluster } from '@/components/TopRightStatusCluster';
@@ -34,6 +34,7 @@ import {
   setRoomId,
   setWorldId,
 } from '@/network';
+import { getAuthAccessToken, initializeAuthSession } from '@/network/auth/authSession';
 import { getRTCManager } from '@/network/rtc/rtcManager';
 
 type GameInstance = {
@@ -108,6 +109,9 @@ export function GameCanvas() {
   }, [initialOnboardingDraft.worldId, joinIdentity]);
 
   useEffect(() => {
+    void initializeAuthSession().catch((error) => {
+      console.error('failed to initialize auth session', error);
+    });
     resetVoiceControlState();
     resetRuntimeUiState();
     setIsGameReady(false);
@@ -203,6 +207,12 @@ export function GameCanvas() {
     const requestedWorldId = joinIdentity.worldId;
     const requestedRoomId = joinIdentity.roomId;
     const requestedAvatarId = normalizeAvatarId(joinIdentity.avatarId);
+    const accessToken = getAuthAccessToken();
+    if (!accessToken) {
+      setSocketUiStatus('FAILED');
+      setJoinUiPhase('CONNECT_FAILED');
+      return;
+    }
 
     resetVoiceControlState();
     resetRuntimeUiState();

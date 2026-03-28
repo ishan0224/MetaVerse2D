@@ -1,5 +1,10 @@
 import type { Express, Request, Response } from 'express';
 
+import {
+  type AuthenticatedSupabaseUser,
+  isSupabaseAuthConfigured,
+  verifySupabaseAccessToken,
+} from '../auth/supabaseAuth';
 import { PlayerPersistenceService } from '../services/playerPersistenceService';
 
 const persistenceService = new PlayerPersistenceService();
@@ -10,7 +15,6 @@ type CreateUserBody = {
 };
 
 type UpsertPlayerStateBody = {
-  userId?: string;
   x?: number;
   y?: number;
   worldId?: string;
@@ -24,13 +28,12 @@ export function attachPersistenceRoutes(app: Express): void {
       return;
     }
 
-    const username = String(request.query.username ?? '').trim();
-    if (!username) {
-      response.status(400).json({ error: 'username is required' });
+    const authUser = await authenticateRequest(request, response);
+    if (!authUser) {
       return;
     }
 
-    const user = await persistenceService.getUserByUsername(username);
+    const user = await persistenceService.getUserByAuthUserId(authUser.authUserId);
     if (!user) {
       response.status(404).json({ error: 'User not found' });
       return;
@@ -39,20 +42,26 @@ export function attachPersistenceRoutes(app: Express): void {
     response.status(200).json({ user });
   });
 
-  app.post('/api/users', async (request: Request<unknown, unknown, CreateUserBody>, response: Response) => {
+  app.post('/api/users', async (request: Request, response: Response) => {
     if (!persistenceService.isEnabled()) {
       response.status(503).json({ error: 'Persistence is disabled' });
       return;
     }
 
-    const username = request.body?.username?.trim() ?? '';
-    if (!username) {
-      response.status(400).json({ error: 'username is required' });
+    const authUser = await authenticateRequest(request, response);
+    if (!authUser) {
       return;
     }
 
-    const avatarUrl = request.body?.avatarUrl?.trim();
-    const user = await persistenceService.getOrCreateUser(username, avatarUrl || undefined);
+    const requestBody = request.body as CreateUserBody | undefined;
+    const username = requestBody?.username?.trim();
+    const avatarUrl = normalizeAvatarUrl(requestBody?.avatarUrl);
+    const user = await persistenceService.getOrCreateUserFromAuth({
+      authUserId: authUser.authUserId,
+      email: resolveAuthEmail(authUser),
+      username,
+      avatarUrl,
+    });
     if (!user) {
       response.status(500).json({ error: 'Failed to resolve user' });
       return;
@@ -67,13 +76,18 @@ export function attachPersistenceRoutes(app: Express): void {
       return;
     }
 
-    const userId = String(request.query.userId ?? '').trim();
-    if (!userId) {
-      response.status(400).json({ error: 'userId is required' });
+    const authUser = await authenticateRequest(request, response);
+    if (!authUser) {
       return;
     }
 
-    const state = await persistenceService.getPlayerState(userId, 'http:get-player-state');
+    const user = await persistenceService.getUserByAuthUserId(authUser.authUserId);
+    if (!user) {
+      response.status(404).json({ error: 'User not found' });
+      return;
+    }
+
+    const state = await persistenceService.getPlayerState(user.id, 'http:get-player-state');
     if (!state) {
       response.status(404).json({ error: 'Player state not found' });
       return;
@@ -84,27 +98,38 @@ export function attachPersistenceRoutes(app: Express): void {
 
   app.post(
     '/api/player-state',
-    async (request: Request<unknown, unknown, UpsertPlayerStateBody>, response: Response) => {
+    async (request: Request, response: Response) => {
       if (!persistenceService.isEnabled()) {
         response.status(503).json({ error: 'Persistence is disabled' });
         return;
       }
 
-      const userId = request.body?.userId?.trim() ?? '';
-      const worldId = request.body?.worldId?.trim() ?? '';
-      const roomId = request.body?.roomId?.trim() ?? '';
-      const x = Number(request.body?.x);
-      const y = Number(request.body?.y);
+      const authUser = await authenticateRequest(request, response);
+      if (!authUser) {
+        return;
+      }
 
-      if (!userId || !worldId || !roomId || Number.isNaN(x) || Number.isNaN(y)) {
+      const user = await persistenceService.getUserByAuthUserId(authUser.authUserId);
+      if (!user) {
+        response.status(404).json({ error: 'User not found' });
+        return;
+      }
+
+      const requestBody = request.body as UpsertPlayerStateBody | undefined;
+      const worldId = requestBody?.worldId?.trim() ?? '';
+      const roomId = requestBody?.roomId?.trim() ?? '';
+      const x = Number(requestBody?.x);
+      const y = Number(requestBody?.y);
+
+      if (!worldId || !roomId || Number.isNaN(x) || Number.isNaN(y)) {
         response.status(400).json({
-          error: 'userId, worldId, roomId, x and y are required',
+          error: 'worldId, roomId, x and y are required',
         });
         return;
       }
 
       await persistenceService.persistPlayerState({
-        userId,
+        userId: user.id,
         x,
         y,
         worldId,
@@ -115,4 +140,64 @@ export function attachPersistenceRoutes(app: Express): void {
       response.status(200).json({ ok: true });
     },
   );
+}
+
+async function authenticateRequest(
+  request: Request,
+  response: Response,
+): Promise<AuthenticatedSupabaseUser | null> {
+  if (!isSupabaseAuthConfigured()) {
+    response.status(503).json({ error: 'Auth is not configured on server' });
+    return null;
+  }
+
+  const accessToken = extractAccessToken(request);
+  if (!accessToken) {
+    response.status(401).json({ error: 'Missing Bearer token' });
+    return null;
+  }
+
+  const authUser = await verifySupabaseAccessToken(accessToken);
+  if (!authUser) {
+    response.status(401).json({ error: 'Invalid access token' });
+    return null;
+  }
+
+  return authUser;
+}
+
+function extractAccessToken(request: Request): string | null {
+  const authorization = request.header('authorization')?.trim();
+  if (!authorization) {
+    return null;
+  }
+
+  const [scheme, token] = authorization.split(/\s+/, 2);
+  if (scheme?.toLowerCase() !== 'bearer' || !token) {
+    return null;
+  }
+
+  const normalizedToken = token.trim();
+  return normalizedToken ? normalizedToken : null;
+}
+
+function resolveAuthEmail(authUser: AuthenticatedSupabaseUser): string {
+  return authUser.email?.trim().toLowerCase() || `${authUser.authUserId}@users.local`;
+}
+
+function normalizeAvatarUrl(avatarUrl: string | undefined): string | undefined {
+  const trimmed = avatarUrl?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return undefined;
+    }
+    return parsed.toString();
+  } catch {
+    return undefined;
+  }
 }

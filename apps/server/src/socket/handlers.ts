@@ -2,6 +2,7 @@ import type { NearbyPlayersMap } from '@metaverse2d/shared';
 import type { InputState } from '@metaverse2d/shared';
 import type { Server as SocketIOServer, Socket } from 'socket.io';
 
+import type { AuthenticatedSupabaseUser } from '../auth/supabaseAuth';
 import { PlayerManager } from '../domain/playerManager';
 import { ProximitySystem } from '../domain/proximitySystem';
 import { getSpawnPositionForRoom } from '../domain/spawnSystem';
@@ -26,7 +27,7 @@ type IceCandidatePayload = {
 };
 
 type JoinPayload = {
-  name: string;
+  name?: string;
   worldId: string;
   roomId: string;
   avatarId?: number;
@@ -73,7 +74,7 @@ const WEBRTC_ICE_CANDIDATE_EVENT = 'webrtc:ice-candidate';
 const playerManager = new PlayerManager();
 const proximitySystem = new ProximitySystem();
 const playerPersistenceService = new PlayerPersistenceService();
-const socketUserIds = new Map<string, string>();
+const socketPersistenceUserIds = new Map<string, string>();
 
 function buildPlayersUpdatePayload(scopeId: string): PlayersUpdatePayload {
   const roomPlayers = playerManager.getPlayersInScope(scopeId);
@@ -97,6 +98,12 @@ function buildPlayersUpdatePayload(scopeId: string): PlayersUpdatePayload {
 }
 
 export function registerSocketHandlers(io: SocketIOServer, socket: Socket): void {
+  const authUser = getSocketAuthUser(socket);
+  if (!authUser) {
+    socket.disconnect(true);
+    return;
+  }
+
   console.log(`user connected: ${socket.id}`);
 
   const relayWebRTCSignal = (
@@ -129,16 +136,13 @@ export function registerSocketHandlers(io: SocketIOServer, socket: Socket): void
   });
 
   const handleJoin = async (payload: JoinPayload): Promise<void> => {
-    const playerName = payload?.name?.trim();
     const worldId = normalizeWorldId(payload?.worldId);
     const roomId = normalizeRoomId(payload?.roomId);
     const avatarId = normalizeAvatarId(payload?.avatarId);
     const avatarUrl = normalizeAvatarUrl(payload?.avatarUrl);
-    if (!playerName) {
-      return;
-    }
+    const fallbackEmail = authUser.email ?? `${authUser.authUserId}@users.local`;
 
-    const existingUserId = socketUserIds.get(socket.id);
+    const existingUserId = socketPersistenceUserIds.get(socket.id);
     const existingPlayer = playerManager.getPlayer(socket.id);
     if (existingUserId && existingPlayer) {
       void playerPersistenceService.persistPlayerState({
@@ -158,11 +162,17 @@ export function registerSocketHandlers(io: SocketIOServer, socket: Socket): void
       io.to(previousScopeId).emit(PLAYERS_UPDATE_EVENT, buildPlayersUpdatePayload(previousScopeId));
     }
 
-    const persistedUser = await playerPersistenceService.getOrCreateUser(playerName, avatarUrl);
+    const persistedUser = await playerPersistenceService.getOrCreateUserFromAuth({
+      authUserId: authUser.authUserId,
+      email: fallbackEmail,
+      username: payload?.name,
+      avatarUrl,
+    });
+    const playerName = resolvePlayerName(payload?.name, persistedUser?.username, fallbackEmail);
     if (persistedUser) {
-      socketUserIds.set(socket.id, persistedUser.id);
+      socketPersistenceUserIds.set(socket.id, persistedUser.id);
     } else {
-      socketUserIds.delete(socket.id);
+      socketPersistenceUserIds.delete(socket.id);
     }
 
     const persistedState = persistedUser
@@ -216,10 +226,10 @@ export function registerSocketHandlers(io: SocketIOServer, socket: Socket): void
 
   socket.on('disconnect', () => {
     const player = playerManager.getPlayer(socket.id);
-    const userId = socketUserIds.get(socket.id);
+    const userId = socketPersistenceUserIds.get(socket.id);
     const scopeId = playerManager.removePlayer(socket.id);
     console.log(`user disconnected: ${socket.id}`);
-    socketUserIds.delete(socket.id);
+    socketPersistenceUserIds.delete(socket.id);
 
     if (player && userId) {
       void playerPersistenceService.persistPlayerState({
@@ -257,6 +267,46 @@ export function registerSocketHandlers(io: SocketIOServer, socket: Socket): void
       candidate: payload?.candidate,
     });
   });
+}
+
+function getSocketAuthUser(socket: Socket): AuthenticatedSupabaseUser | null {
+  const maybeAuthUser = (socket.data as { authUser?: AuthenticatedSupabaseUser }).authUser;
+  if (!maybeAuthUser) {
+    return null;
+  }
+
+  const normalizedAuthUserId = maybeAuthUser.authUserId?.trim();
+  if (!normalizedAuthUserId) {
+    return null;
+  }
+
+  return {
+    authUserId: normalizedAuthUserId,
+    email: maybeAuthUser.email ?? null,
+  };
+}
+
+function resolvePlayerName(
+  requestedName: string | undefined,
+  persistedUsername: string | undefined,
+  fallbackEmail: string,
+): string {
+  const trimmedRequested = requestedName?.trim();
+  if (trimmedRequested) {
+    return trimmedRequested.slice(0, 32);
+  }
+
+  const trimmedPersisted = persistedUsername?.trim();
+  if (trimmedPersisted) {
+    return trimmedPersisted.slice(0, 32);
+  }
+
+  const fallbackFromEmail = fallbackEmail.split('@')[0]?.trim();
+  if (fallbackFromEmail) {
+    return fallbackFromEmail.slice(0, 32);
+  }
+
+  return 'player';
 }
 
 function normalizeAvatarUrl(avatarUrl: string | undefined): string | undefined {

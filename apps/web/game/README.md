@@ -5,6 +5,7 @@ Reserved for Phaser integration and gameplay runtime code.
 Rules:
 - Keep this layer focused on rendering and local scene orchestration.
 - Networking is NOT allowed in this layer. Phaser code must never import or use sockets directly.
+- Authentication is NOT allowed in this layer. Game code must never handle JWT/cookies/password flows directly.
 - Consume stable interfaces from `network` and shared packages.
 - Entities are dumb render/data holders with no input or movement logic.
 - Systems own gameplay logic orchestration (input mapping and movement application).

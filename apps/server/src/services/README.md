@@ -7,3 +7,4 @@ Rules:
 - Services may call domain managers and db query modules.
 - Keep socket handlers thin by delegating non-transport concerns to services.
 - Persistence writes should be outside movement hot loops and should fail gracefully.
+- Auth-linked user resolution (`auth_user_id`, `email`, profile defaults) should be orchestrated here, not inside transport handlers.

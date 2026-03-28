@@ -9,16 +9,16 @@ import {
   type MovementDirection,
   normalizeAvatarId,
 } from '@/game/config/characterSpriteConfig';
+import { ensureAvatarTexture, normalizeAvatarUrl } from '@/game/utils/avatarTexture';
 import {
+  type BumpWarningBubble,
   createBumpWarningBubble,
   destroyBumpWarningBubble,
   hideBumpWarningBubble,
   setBumpWarningBubbleDepth,
   showBumpWarningBubble,
-  type BumpWarningBubble,
   updateBumpWarningBubblePosition,
 } from '@/game/utils/bumpWarningBubble';
-import { ensureAvatarTexture, normalizeAvatarUrl } from '@/game/utils/avatarTexture';
 import { getWalkAnimationKey } from '@/game/utils/characterAnimations';
 import { createNameLabel, updateNameLabelPosition } from '@/game/utils/createNameLabel';
 

@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+
 import { Client } from 'pg';
 
 import { loadServerEnvironment } from '../core/loadEnvironment';

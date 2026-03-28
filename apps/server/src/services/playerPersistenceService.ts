@@ -1,9 +1,15 @@
 import { getDbClient } from '../db/client';
 import { getPlayerStateByUserId, upsertPlayerState } from '../db/queries/playerState';
-import { createUser, getUserByUsername, setUserAvatarUrlIfMissing } from '../db/queries/users';
+import {
+  createUser,
+  getUserByAuthUserId,
+  getUserByUsername,
+} from '../db/queries/users';
 
 export type PersistedUser = {
   id: string;
+  authUserId: string;
+  email: string | null;
   username: string;
   avatarUrl: string | null;
 };
@@ -26,44 +32,63 @@ type UpsertPersistedPlayerStateInput = {
   socketId?: string;
 };
 
+type ResolveUserFromAuthInput = {
+  authUserId: string;
+  email: string;
+  username?: string;
+  avatarUrl?: string;
+};
+
 export class PlayerPersistenceService {
   public isEnabled(): boolean {
     return getDbClient() !== null;
   }
 
-  public async getOrCreateUser(username: string, avatarUrl?: string): Promise<PersistedUser | null> {
+  public async getOrCreateUserFromAuth(
+    input: ResolveUserFromAuthInput,
+  ): Promise<PersistedUser | null> {
     const db = getDbClient();
     if (!db) {
       return null;
     }
 
-    const normalizedUsername = username.trim();
-    if (!normalizedUsername) {
+    const normalizedAuthUserId = input.authUserId.trim();
+    const normalizedEmail = input.email.trim().toLowerCase();
+    if (!normalizedAuthUserId || !normalizedEmail) {
       return null;
     }
+    const normalizedUsername = normalizeUsername(input.username, normalizedEmail);
+    const normalizedAvatarUrl = input.avatarUrl?.trim() || undefined;
 
     try {
-      const existingUser = await getUserByUsername(db, normalizedUsername);
+      const existingUser = await getUserByAuthUserId(db, normalizedAuthUserId);
       if (existingUser) {
-        if (avatarUrl && !existingUser.avatarUrl) {
-          await setUserAvatarUrlIfMissing(db, existingUser.id, avatarUrl);
-          return {
-            id: existingUser.id,
-            username: existingUser.username,
-            avatarUrl,
-          };
+        const resolvedUsername = normalizedUsername || existingUser.username;
+        const resolvedAvatarUrl = normalizedAvatarUrl ?? existingUser.avatarUrl ?? undefined;
+        const upsertedUser = await createUser(db, {
+          authUserId: normalizedAuthUserId,
+          email: normalizedEmail,
+          username: resolvedUsername,
+          avatarUrl: resolvedAvatarUrl,
+        });
+        if (!upsertedUser) {
+          return null;
         }
 
         return {
-          id: existingUser.id,
-          username: existingUser.username,
-          avatarUrl: existingUser.avatarUrl,
+          id: upsertedUser.id,
+          authUserId: upsertedUser.authUserId,
+          email: upsertedUser.email,
+          username: upsertedUser.username,
+          avatarUrl: upsertedUser.avatarUrl,
         };
       }
 
       const createdUser = await createUser(db, {
+        authUserId: normalizedAuthUserId,
+        email: normalizedEmail,
         username: normalizedUsername,
-        avatarUrl,
+        avatarUrl: normalizedAvatarUrl,
       });
       if (!createdUser) {
         return null;
@@ -71,13 +96,50 @@ export class PlayerPersistenceService {
 
       return {
         id: createdUser.id,
+        authUserId: createdUser.authUserId,
+        email: createdUser.email,
         username: createdUser.username,
         avatarUrl: createdUser.avatarUrl,
       };
     } catch (error) {
-      console.error('[persistence] failed to get/create user', {
+      console.error('[persistence] failed to resolve auth user', {
         event: 'user_lookup',
-        username: normalizedUsername,
+        authUserId: normalizedAuthUserId,
+        email: normalizedEmail,
+        error,
+      });
+      return null;
+    }
+  }
+
+  public async getUserByAuthUserId(authUserId: string): Promise<PersistedUser | null> {
+    const db = getDbClient();
+    if (!db) {
+      return null;
+    }
+
+    const normalizedAuthUserId = authUserId.trim();
+    if (!normalizedAuthUserId) {
+      return null;
+    }
+
+    try {
+      const user = await getUserByAuthUserId(db, normalizedAuthUserId);
+      if (!user) {
+        return null;
+      }
+
+      return {
+        id: user.id,
+        authUserId: user.authUserId,
+        email: user.email,
+        username: user.username,
+        avatarUrl: user.avatarUrl,
+      };
+    } catch (error) {
+      console.error('[persistence] failed to load auth user', {
+        event: 'user_read',
+        authUserId: normalizedAuthUserId,
         error,
       });
       return null;
@@ -103,12 +165,14 @@ export class PlayerPersistenceService {
 
       return {
         id: user.id,
+        authUserId: user.authUserId,
+        email: user.email,
         username: user.username,
         avatarUrl: user.avatarUrl,
       };
     } catch (error) {
-      console.error('[persistence] failed to load user', {
-        event: 'user_read',
+      console.error('[persistence] failed to load user by username', {
+        event: 'user_read_by_username',
         username: normalizedUsername,
         error,
       });
@@ -172,4 +236,18 @@ export class PlayerPersistenceService {
       });
     }
   }
+}
+
+function normalizeUsername(username: string | undefined, email: string): string {
+  const trimmed = username?.trim();
+  if (trimmed) {
+    return trimmed.slice(0, 32);
+  }
+
+  const emailPrefix = email.split('@')[0]?.trim();
+  if (emailPrefix) {
+    return emailPrefix.slice(0, 32);
+  }
+
+  return 'player';
 }

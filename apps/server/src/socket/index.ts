@@ -1,7 +1,8 @@
 import type { Server as HttpServer } from 'node:http';
 
-import { Server as SocketIOServer } from 'socket.io';
+import { Server as SocketIOServer, type Socket } from 'socket.io';
 
+import { verifySupabaseAccessToken } from '../auth/supabaseAuth';
 import { registerSocketHandlers } from './handlers';
 
 export function attachSocketServer(httpServer: HttpServer): SocketIOServer {
@@ -20,11 +21,70 @@ export function attachSocketServer(httpServer: HttpServer): SocketIOServer {
     },
   });
 
+  io.use((socket, next) => {
+    void (async () => {
+      const accessToken = extractSocketAccessToken(socket);
+      if (!accessToken) {
+        next(new Error('missing auth token'));
+        return;
+      }
+
+      const authUser = await verifySupabaseAccessToken(accessToken);
+      if (!authUser) {
+        next(new Error('invalid auth token'));
+        return;
+      }
+
+      socket.data.authUser = authUser;
+      next();
+    })().catch((error) => {
+      next(error as Error);
+    });
+  });
+
   io.on('connection', (socket) => {
     registerSocketHandlers(io, socket);
   });
 
   return io;
+}
+
+function extractSocketAccessToken(socket: Socket): string | null {
+  const handshakeAuth = socket.handshake.auth as
+    | {
+        token?: unknown;
+        accessToken?: unknown;
+      }
+    | undefined;
+  const tokenFromHandshake =
+    toTrimmedString(handshakeAuth?.token) ?? toTrimmedString(handshakeAuth?.accessToken);
+  if (tokenFromHandshake) {
+    return tokenFromHandshake;
+  }
+
+  const authorizationHeaderRaw = socket.handshake.headers.authorization;
+  const authorizationHeader = Array.isArray(authorizationHeaderRaw)
+    ? authorizationHeaderRaw[0]
+    : authorizationHeaderRaw;
+  if (!authorizationHeader) {
+    return null;
+  }
+
+  const [scheme, token] = authorizationHeader.split(/\s+/, 2);
+  if (scheme?.toLowerCase() !== 'bearer') {
+    return null;
+  }
+
+  return toTrimmedString(token) ?? null;
+}
+
+function toTrimmedString(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
 }
 
 function getAllowedOrigins(): Set<string> {

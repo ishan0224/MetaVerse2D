@@ -1,6 +1,24 @@
+@import url('https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400..700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@font-face {
+  font-family: 'Neon Pixel-7';
+  src: url('/neon-pixel-7/neon_pixel-7.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Small Pixel-7';
+  src: url('/small-pixel7/small_pixel-7.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
 
 :root {
   color-scheme: dark;
@@ -72,12 +90,18 @@ body {
 
 .onboarding-readable-text {
   text-shadow:
-    0 1px 1px rgba(2, 6, 23, 0.88),
-    0 2px 10px rgba(2, 6, 23, 0.58);
+    -1px -1px 0 #000,
+    1px -1px 0 #000,
+    -1px 1px 0 #000,
+    1px 1px 0 #000,
+    #474747 3px 5px 2px;
 }
 
 .onboarding-readable-text-strong {
   text-shadow:
-    0 1px 1px rgba(2, 6, 23, 0.94),
-    0 4px 14px rgba(2, 6, 23, 0.72);
+    -1px -1px 0 #000,
+    1px -1px 0 #000,
+    -1px 1px 0 #000,
+    1px 1px 0 #000,
+    #474747 3px 5px 2px;
 }

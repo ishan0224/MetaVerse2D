@@ -2,6 +2,7 @@ import type { InputState } from '@metaverse2d/shared/types/InputState';
 import { io, type Socket } from 'socket.io-client';
 
 import { webEnv } from '@/config/env';
+import { getAuthAccessToken } from '@/network/auth/authSession';
 
 type PlayerState = {
   id: string;
@@ -68,12 +69,16 @@ export function getSocketClient(): GameSocket {
     socket = io(webEnv.socketUrl, {
       autoConnect: false,
       transports: ['websocket', 'polling'],
+      auth: (callback) => {
+        callback({ token: getAuthAccessToken() ?? undefined });
+      },
     });
 
     socket.on('connect', () => {
       const transport = socket?.io?.engine?.transport?.name ?? 'unknown';
       console.log(`connected to server via ${transport}`);
-      if (playerName && worldId && roomId) {
+      const accessToken = getAuthAccessToken();
+      if (playerName && worldId && roomId && accessToken) {
         socket?.emit('join', {
           name: playerName,
           worldId,
@@ -127,7 +132,7 @@ export function getWorldId(): string | null {
 
 export function sendInput(inputState: InputState, delta: number): void {
   const client = getSocketClient();
-  if (!client.connected) {
+  if (!client.connected || !getAuthAccessToken()) {
     return;
   }
 

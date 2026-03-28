@@ -5,6 +5,8 @@ import type { UserRow } from '../schema';
 import { users } from '../schema';
 
 type CreateUserInput = {
+  authUserId: string;
+  email: string;
   username: string;
   avatarUrl?: string;
 };
@@ -14,21 +16,41 @@ export async function getUserByUsername(db: DbClient, username: string): Promise
   return user ?? null;
 }
 
+export async function getUserByAuthUserId(db: DbClient, authUserId: string): Promise<UserRow | null> {
+  const [user] = await db.select().from(users).where(eq(users.authUserId, authUserId)).limit(1);
+  return user ?? null;
+}
+
+export async function getUserByEmail(db: DbClient, email: string): Promise<UserRow | null> {
+  const [user] = await db.select().from(users).where(eq(users.email, email)).limit(1);
+  return user ?? null;
+}
+
 export async function createUser(db: DbClient, input: CreateUserInput): Promise<UserRow | null> {
   const [createdUser] = await db
     .insert(users)
     .values({
+      id: input.authUserId,
+      authUserId: input.authUserId,
+      email: input.email,
       username: input.username,
       avatarUrl: input.avatarUrl,
     })
-    .onConflictDoNothing({ target: users.username })
+    .onConflictDoUpdate({
+      target: users.authUserId,
+      set: {
+        email: input.email,
+        username: input.username,
+        avatarUrl: input.avatarUrl,
+      },
+    })
     .returning();
 
   if (createdUser) {
     return createdUser;
   }
 
-  return getUserByUsername(db, input.username);
+  return getUserByAuthUserId(db, input.authUserId);
 }
 
 export async function setUserAvatarUrlIfMissing(

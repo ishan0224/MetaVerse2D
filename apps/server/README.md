@@ -17,6 +17,10 @@ Rules:
 - Real-time movement remains in-memory; DB writes happen only off hot path (disconnect persistence).
 - Join may read persisted state once for reconnect restore; DB failures must fallback to default spawn behavior.
 - `SERVER_DATABASE_URL` controls persistence enablement; when absent, server runs in memory-only mode.
+- Authn/Authz: Supabase access JWT is required for socket connection and persistence HTTP endpoints.
+- Auth tokens are verified server-side (never trust client identity fields for authorization).
+- App DB does not store passwords. Password handling is delegated to Supabase Auth (`auth.users`).
+- This project does not use app-managed auth cookies for server auth; it uses bearer/handshake JWT transport.
 - Server runtime and Drizzle commands auto-load env from `apps/server/.env` (root `.env` fallback is supported for legacy setup).
 - Minimal persistence HTTP endpoints are exposed for non-realtime access:
   - `GET/POST /api/users`
@@ -34,15 +38,35 @@ Rules:
      postgresql://postgres.<PROJECT-REF>:<PASSWORD>@aws-<REGION>.pooler.supabase.com:5432/postgres?sslmode=require&uselibpqcompat=true
      ```
    - Use the **Session Pooler (5432)** connection string from Supabase project settings.
-3. Run migration from repo root:
+3. Set Supabase Auth config in `apps/server/.env`:
+   ```text
+   SERVER_SUPABASE_URL=https://<project-ref>.supabase.co
+   SERVER_SUPABASE_ANON_KEY=<supabase-anon-key>
+   ```
+4. Ensure frontend sends JWTs:
+   - Socket.IO handshake token (`handshake.auth.token`)
+   - HTTP `Authorization: Bearer <access-jwt>`
+5. Run migration from repo root:
    ```bash
    npm run db:check --workspace @metaverse2d/server
    npm run db:migrate --workspace @metaverse2d/server
    ```
-4. Start server:
+6. Start server:
    ```bash
    npm run dev:server
    ```
+
+## Auth Transport Summary
+
+- Socket auth:
+  - Client connects with Supabase access JWT in `socket.handshake.auth.token`.
+  - Server verifies token before allowing connection/event handling.
+- HTTP auth:
+  - Persistence routes require `Authorization: Bearer <access-jwt>`.
+  - Route handlers resolve identity from token, not request `userId`.
+- Cookies:
+  - No custom app auth cookie/session middleware is implemented here.
+  - Supabase client-side session management is used to obtain/refresh access JWTs.
 
 ### Optional Drizzle Commands
 
