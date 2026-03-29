@@ -3,14 +3,15 @@ import type { Server as HttpServer } from 'node:http';
 import { Server as SocketIOServer, type Socket } from 'socket.io';
 
 import { verifySupabaseAccessToken } from '../auth/supabaseAuth';
+import { resolveServerRuntimeEnv } from '../core/loadEnvironment';
 import { registerSocketHandlers } from './handlers';
 
 export function attachSocketServer(httpServer: HttpServer): SocketIOServer {
-  const allowedOrigins = getAllowedOrigins();
+  const runtimeEnv = resolveServerRuntimeEnv();
   const io = new SocketIOServer(httpServer, {
     cors: {
       origin: (origin, callback) => {
-        if (!origin || isOriginAllowed(origin, allowedOrigins)) {
+        if (!origin || isOriginAllowed(origin, runtimeEnv.allowedSocketOrigins, runtimeEnv.allowDevTunnelOrigins)) {
           callback(null, true);
           return;
         }
@@ -87,24 +88,21 @@ function toTrimmedString(value: unknown): string | null {
   return trimmed ? trimmed : null;
 }
 
-function getAllowedOrigins(): Set<string> {
-  const fromEnv = (process.env.CLIENT_ORIGIN ?? '')
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean);
+function isOriginAllowed(
+  origin: string,
+  allowedOrigins: Set<string>,
+  allowDevTunnelOrigins: boolean,
+): boolean {
+  let normalizedOrigin = origin;
+  try {
+    normalizedOrigin = new URL(origin).origin;
+  } catch {
+    return false;
+  }
 
-  return new Set([
-    'http://localhost:3000',
-    'https://localhost:3000',
-    ...fromEnv,
-  ]);
-}
-
-function isOriginAllowed(origin: string, allowedOrigins: Set<string>): boolean {
-  if (allowedOrigins.has(origin)) {
+  if (allowedOrigins.has(normalizedOrigin)) {
     return true;
   }
 
-  // Quick-tunnel dev domains rotate often; allow them explicitly for this dev server.
-  return origin.endsWith('.trycloudflare.com');
+  return allowDevTunnelOrigins && normalizedOrigin.endsWith('.trycloudflare.com');
 }

@@ -311,7 +311,7 @@ export function OnboardingOverlay({
 
   return (
     <div
-      className="onboarding-readable-text absolute inset-0 z-40 flex items-start justify-center overflow-y-auto bg-[radial-gradient(circle_at_20%_20%,rgba(56,189,248,0.16),transparent_44%),radial-gradient(circle_at_80%_80%,rgba(251,146,60,0.16),transparent_42%),rgba(3,7,18,0.34)] px-3 py-4 sm:items-center sm:p-6"
+      className="onboarding-readable-text absolute inset-0 z-40 flex items-start justify-center overflow-y-auto bg-[radial-gradient(circle_at_20%_20%,rgba(56,189,248,0.2),transparent_44%),radial-gradient(circle_at_80%_80%,rgba(251,146,60,0.2),transparent_42%),rgba(3,7,18,0.72)] px-3 py-4 sm:items-center sm:p-6"
       onKeyDown={handleRootKeyDown}
       style={{ fontFamily: '"Small Pixel-7", "Neon Pixel-7", "Pixelify Sans", "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif' }}
     >
@@ -325,44 +325,42 @@ export function OnboardingOverlay({
             </span>
           </div>
 
-          <div className="onboarding-panel-in [contain:layout_paint] overflow-hidden rounded-2xl border border-sky-200/25 bg-[#0c1320]/88 shadow-[0_12px_34px_rgba(2,6,23,0.62)]">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 px-5 py-3 sm:px-7">
-              <span className="text-sm uppercase tracking-[0.18em] text-sky-100/80 sm:text-base">Onboarding</span>
-              <span className="text-sm font-semibold text-sky-50/80 sm:text-base">Step {currentStepNumber} / 4</span>
+          <div className="onboarding-panel-in [contain:layout_paint] overflow-hidden rounded-2xl border border-sky-200/35 bg-[#0c1320]/82 shadow-[0_16px_42px_rgba(2,6,23,0.64)] backdrop-blur-[1.5px]">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/15 px-5 py-3 sm:px-7">
+              <span className="text-sm uppercase tracking-[0.18em] text-sky-100/90 sm:text-base">Onboarding</span>
+              <span className="text-sm font-semibold text-sky-50/90 sm:text-base">Step {currentStepNumber} / 4</span>
             </div>
 
             {step === 'name' ? (
               <div className="grid grid-cols-1 md:grid-cols-2">
-                <section className="border-b border-white/10 p-5 md:border-b-0 md:border-r md:border-white/10 md:p-8">
+                <section className="border-b border-white/15 p-5 md:border-b-0 md:border-r md:border-white/15 md:p-8">
                   <h2 className="text-4xl font-bold text-white sm:text-5xl">Account Access</h2>
-                  <p className="mt-2 text-lg text-zinc-300 sm:text-xl">Sign in or create an account to continue.</p>
+                  <p className="mt-2 text-lg text-zinc-200 sm:text-xl">Sign in or create an account to continue.</p>
 
-                  <div className="mt-5 grid grid-cols-2 gap-2 rounded-xl bg-black/30 p-1">
+                  <div className="mt-5 grid grid-cols-2 gap-2 rounded-xl bg-black/42 p-1">
                     <button
                       type="button"
                       onClick={() => setAuthMode('LOGIN')}
-                      className={`rounded-lg px-3 py-2 text-sm font-semibold uppercase tracking-wider transition-colors duration-75 ease-out sm:text-base ${
-                        authMode === 'LOGIN'
-                          ? 'bg-cyan-300 text-slate-950'
-                          : 'text-zinc-300 hover:bg-white/10'
-                      }`}
+                      className={`rounded-lg border px-3 py-2 text-sm font-semibold uppercase tracking-wider transition-colors duration-75 ease-out sm:text-base ${authMode === 'LOGIN'
+                        ? 'border-cyan-100/85 bg-cyan-300 text-slate-950'
+                        : 'border-white/40 text-zinc-100 hover:border-white/65 hover:bg-white/20'
+                        }`}
                     >
                       Login
                     </button>
                     <button
                       type="button"
                       onClick={() => setAuthMode('SIGN_UP')}
-                      className={`rounded-lg px-3 py-2 text-sm font-semibold uppercase tracking-wider transition-colors duration-75 ease-out sm:text-base ${
-                        authMode === 'SIGN_UP'
-                          ? 'bg-cyan-300 text-slate-950'
-                          : 'text-zinc-300 hover:bg-white/10'
-                      }`}
+                      className={`rounded-lg border px-3 py-2 text-sm font-semibold uppercase tracking-wider transition-colors duration-75 ease-out sm:text-base ${authMode === 'SIGN_UP'
+                        ? 'border-cyan-100/85 bg-cyan-300 text-slate-950'
+                        : 'border-white/40 text-zinc-100 hover:border-white/65 hover:bg-white/20'
+                        }`}
                     >
                       Sign Up
                     </button>
                   </div>
 
-                  <label htmlFor="onboarding-email" className="mt-4 block text-base uppercase tracking-widest text-zinc-400 sm:text-lg">
+                  <label htmlFor="onboarding-email" className="mt-4 block text-base uppercase tracking-widest text-zinc-200 sm:text-lg">
                     Email
                   </label>
                   <input
@@ -382,12 +380,12 @@ export function OnboardingOverlay({
                     }}
                     autoFocus
                     maxLength={120}
-                    className="mt-2 w-full rounded-xl border border-sky-100/20 bg-black/40 px-4 py-3 text-xl text-zinc-100 outline-none transition-colors duration-75 ease-out focus:border-sky-300/60 focus:ring-2 focus:ring-sky-300/40 sm:text-2xl"
+                    className="mt-2 w-full rounded-xl border border-sky-100/45 bg-black/52 px-4 py-3 text-xl text-zinc-50 outline-none transition-colors duration-75 ease-out focus:border-sky-300/85 focus:ring-2 focus:ring-sky-300/50 sm:text-2xl"
                     placeholder="you@example.com"
                     autoComplete="email"
                   />
 
-                  <label htmlFor="onboarding-password" className="mt-4 block text-base uppercase tracking-widest text-zinc-400 sm:text-lg">
+                  <label htmlFor="onboarding-password" className="mt-4 block text-base uppercase tracking-widest text-zinc-200 sm:text-lg">
                     Password
                   </label>
                   <input
@@ -407,12 +405,12 @@ export function OnboardingOverlay({
                       }
                     }}
                     maxLength={128}
-                    className="mt-2 w-full rounded-xl border border-sky-100/20 bg-black/40 px-4 py-3 text-xl text-zinc-100 outline-none transition-colors duration-75 ease-out focus:border-sky-300/60 focus:ring-2 focus:ring-sky-300/40 sm:text-2xl"
+                    className="mt-2 w-full rounded-xl border border-sky-100/45 bg-black/52 px-4 py-3 text-xl text-zinc-50 outline-none transition-colors duration-75 ease-out focus:border-sky-300/85 focus:ring-2 focus:ring-sky-300/50 sm:text-2xl"
                     placeholder={authMode === 'SIGN_UP' ? 'Create password (8+ chars)' : 'Enter password'}
                     autoComplete={authMode === 'SIGN_UP' ? 'new-password' : 'current-password'}
                   />
 
-                  <label htmlFor="onboarding-name" className="mt-4 block text-base uppercase tracking-widest text-zinc-400 sm:text-lg">
+                  <label htmlFor="onboarding-name" className="mt-4 block text-base uppercase tracking-widest text-zinc-200 sm:text-lg">
                     Display Name (Optional)
                   </label>
                   <input
@@ -431,7 +429,7 @@ export function OnboardingOverlay({
                       }
                     }}
                     maxLength={20}
-                    className="mt-2 w-full rounded-xl border border-sky-100/20 bg-black/40 px-4 py-3 text-xl text-zinc-100 outline-none transition-colors duration-75 ease-out focus:border-sky-300/60 focus:ring-2 focus:ring-sky-300/40 sm:text-2xl"
+                    className="mt-2 w-full rounded-xl border border-sky-100/45 bg-black/52 px-4 py-3 text-xl text-zinc-50 outline-none transition-colors duration-75 ease-out focus:border-sky-300/85 focus:ring-2 focus:ring-sky-300/50 sm:text-2xl"
                     placeholder="Defaults to email prefix"
                     autoComplete="nickname"
                   />
@@ -439,7 +437,7 @@ export function OnboardingOverlay({
                   <div className="min-h-6 pt-2 text-base text-rose-300 sm:text-lg">{authError ?? nameError ?? ''}</div>
 
                   {hasSavedSession ? (
-                    <div className="mb-3 rounded-xl border border-emerald-300/30 bg-emerald-400/10 px-3 py-2 text-sm text-emerald-100 sm:text-base">
+                    <div className="mb-3 rounded-xl border border-emerald-200/75 bg-emerald-400/18 px-3 py-2 text-sm text-emerald-50 sm:text-base">
                       <span>Signed in as </span>
                       <span className="font-semibold">{authSession.user?.email}</span>
                     </div>
@@ -450,7 +448,7 @@ export function OnboardingOverlay({
                       <button
                         type="button"
                         onClick={continueWithSavedSession}
-                        className="w-full rounded-xl border border-emerald-200/60 bg-emerald-300/20 px-4 py-2 text-base font-semibold text-emerald-100 transition duration-75 ease-out hover:bg-emerald-200/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-100 sm:w-auto sm:text-lg"
+                        className="w-full rounded-xl border border-emerald-200/75 bg-emerald-300/35 px-4 py-2 text-base font-semibold text-emerald-50 transition duration-75 ease-out hover:bg-emerald-200/45 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-100 sm:w-auto sm:text-lg"
                       >
                         Continue Saved Session
                       </button>
@@ -459,7 +457,7 @@ export function OnboardingOverlay({
                       <button
                         type="button"
                         onClick={handleSignOut}
-                        className="w-full rounded-xl border border-white/25 px-4 py-2 text-base font-semibold text-zinc-100 transition duration-75 ease-out hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/70 sm:w-auto sm:text-lg"
+                        className="w-full rounded-xl border border-white/45 bg-white/12 px-4 py-2 text-base font-semibold text-zinc-50 transition duration-75 ease-out hover:bg-white/24 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/80 sm:w-auto sm:text-lg"
                       >
                         Sign Out
                       </button>
@@ -480,7 +478,7 @@ export function OnboardingOverlay({
                 <section className="flex items-center justify-center p-6 md:p-8">
                   <div className="max-w-sm text-center">
                     <p className="text-4xl font-semibold leading-tight text-sky-100 sm:text-5xl lg:text-6xl">Welcome to your 2D world</p>
-                    <p className="mt-3 text-2xl text-zinc-300 sm:text-3xl">
+                    <p className="mt-3 text-2xl text-zinc-200 sm:text-3xl">
                       Build your identity, choose an avatar, and jump into your room.
                     </p>
                   </div>
@@ -490,7 +488,7 @@ export function OnboardingOverlay({
 
             {step === 'avatar' ? (
               <div className="grid grid-cols-1 md:grid-cols-2">
-                <section className="border-b border-white/10 p-5 md:border-b-0 md:border-r md:border-white/10 md:p-8">
+                <section className="border-b border-white/15 p-5 md:border-b-0 md:border-r md:border-white/15 md:p-8">
                   <h2 className="text-4xl font-bold text-white sm:text-5xl">Please select your avatar</h2>
                   <div className="mt-5 grid gap-2">
                     {AVATAR_IDS.map((candidate) => {
@@ -500,11 +498,10 @@ export function OnboardingOverlay({
                           key={candidate}
                           type="button"
                           onClick={() => setAvatarId(candidate)}
-                          className={`rounded-xl border px-4 py-3 text-left text-lg font-semibold transition-colors duration-75 ease-out sm:text-xl ${
-                            selected
-                              ? 'border-cyan-200/80 bg-cyan-400/20 text-cyan-50 shadow-[0_0_0_1px_rgba(125,211,252,0.4)]'
-                              : 'border-white/10 bg-black/30 text-zinc-200 hover:border-cyan-200/40 hover:bg-cyan-500/10'
-                          }`}
+                          className={`rounded-xl border px-4 py-3 text-left text-lg font-semibold transition-colors duration-75 ease-out sm:text-xl ${selected
+                            ? 'border-cyan-200/80 bg-cyan-400/20 text-cyan-50 shadow-[0_0_0_1px_rgba(125,211,252,0.4)]'
+                            : 'border-white/30 bg-black/42 text-zinc-100 hover:border-cyan-200/60 hover:bg-cyan-500/20'
+                            }`}
                         >
                           Avatar {candidate}
                         </button>
@@ -515,7 +512,7 @@ export function OnboardingOverlay({
                     <button
                       type="button"
                       onClick={handleBack}
-                      className="rounded-xl border border-white/20 px-4 py-2 text-base font-semibold text-zinc-100 transition-colors duration-75 ease-out hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60 sm:text-lg"
+                      className="rounded-xl border border-white/45 bg-white/12 px-4 py-2 text-base font-semibold text-zinc-50 transition-colors duration-75 ease-out hover:bg-white/24 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/75 sm:text-lg"
                     >
                       Back
                     </button>
@@ -530,9 +527,9 @@ export function OnboardingOverlay({
                 </section>
 
                 <section className="flex items-center justify-center p-6 md:p-8">
-                  <div className="w-full max-w-xs rounded-2xl border border-cyan-200/20 bg-transparent p-5 shadow-[0_10px_26px_rgba(14,116,144,0.16)]">
-                    <p className="text-center text-sm uppercase tracking-[0.2em] text-cyan-100/70 sm:text-base">Animated Preview</p>
-                    <div className="mt-4 flex items-center justify-center rounded-xl border border-white/10 bg-transparent py-8">
+                  <div className="w-full max-w-xs rounded-2xl border border-cyan-200/40 bg-slate-950/22 p-5 shadow-[0_12px_30px_rgba(14,116,144,0.26)]">
+                    <p className="text-center text-sm uppercase tracking-[0.2em] text-cyan-100/95 sm:text-base">Animated Preview</p>
+                    <div className="mt-4 flex items-center justify-center rounded-xl border border-white/30 bg-black/28 py-8">
                       <AvatarSpritePreview avatarId={avatarId} />
                     </div>
                   </div>
@@ -551,18 +548,17 @@ export function OnboardingOverlay({
                         key={world.id}
                         type="button"
                         onClick={() => setWorldId(world.id)}
-                        className={`group relative min-h-[220px] overflow-hidden rounded-2xl border bg-cover bg-center text-left transition-[transform,border-color] duration-90 ease-out will-change-transform hover:-translate-y-1 hover:scale-[1.008] ${
-                          selected
-                            ? 'border-cyan-200/80'
-                            : 'border-white/15 hover:border-cyan-200/60'
-                        }`}
+                        className={`group relative min-h-[220px] overflow-hidden rounded-2xl border bg-cover bg-center text-left transition-[transform,border-color] duration-90 ease-out will-change-transform hover:-translate-y-1 hover:scale-[1.008] ${selected
+                          ? 'border-cyan-200/80'
+                          : 'border-white/40 hover:border-cyan-200/80'
+                          }`}
                         style={{ backgroundImage: `url(${world.previewImage})` }}
                       >
-                        <div className="absolute inset-0 bg-gradient-to-t from-slate-950/55 via-slate-900/22 to-slate-900/5" />
+                        <div className="absolute inset-0 bg-gradient-to-t from-slate-950/60 via-slate-900/28 to-slate-900/10" />
                         <div className="relative flex h-full items-end p-2">
-                          <div className="w-full rounded-xl border border-cyan-100/55 bg-black/10 p-4 shadow-[0_4px_14px_rgba(0,0,0,0.22)]">
-                            <p className="text-xl font-semibold text-zinc-100 sm:text-2xl">{world.title}</p>
-                            <p className="mt-1 text-lg text-zinc-300 sm:text-xl">{world.subtitle}</p>
+                          <div className="w-full rounded-xl border border-cyan-100/70 bg-black/38 p-4 shadow-[0_4px_14px_rgba(0,0,0,0.3)]">
+                            <p className="text-xl font-semibold text-zinc-50 sm:text-2xl">{world.title}</p>
+                            <p className="mt-1 text-lg text-zinc-200 sm:text-xl">{world.subtitle}</p>
                           </div>
                         </div>
                         {selected ? (
@@ -582,7 +578,7 @@ export function OnboardingOverlay({
                   <button
                     type="button"
                     onClick={handleBack}
-                    className="w-full rounded-xl border border-white/20 px-4 py-2 text-base font-semibold text-zinc-100 transition-colors duration-75 ease-out hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60 sm:w-auto sm:text-lg"
+                    className="w-full rounded-xl border border-white/45 bg-white/12 px-4 py-2 text-base font-semibold text-zinc-50 transition-colors duration-75 ease-out hover:bg-white/24 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/75 sm:w-auto sm:text-lg"
                   >
                     Back
                   </button>
@@ -602,15 +598,15 @@ export function OnboardingOverlay({
 
       {step === 'roomConfirm' ? (
         <div
-          className={`[contain:layout_paint] w-full max-w-5xl rounded-2xl border border-cyan-200/35 bg-[#09101d]/92 px-5 py-6 shadow-[0_12px_34px_rgba(2,6,23,0.66)] sm:px-7 ${
+          className={`[contain:layout_paint] w-full max-w-5xl rounded-2xl border border-cyan-200/45 bg-[#09101d]/82 px-5 py-6 shadow-[0_16px_40px_rgba(2,6,23,0.66)] backdrop-blur-[1.5px] sm:px-7 ${
             isClosingRoomStrip ? 'onboarding-room-strip-out' : 'onboarding-room-strip-in'
           }`}
         >
           <div className="grid gap-5 sm:grid-cols-[2fr_1fr] sm:items-end">
             <div>
               <h2 className="text-4xl font-bold text-zinc-100 sm:text-5xl">Enter room ID</h2>
-              <p className="mt-1 text-lg text-zinc-300 sm:text-xl">Use the same room ID to join friends in the same world.</p>
-              <label htmlFor="onboarding-room-id" className="mt-4 block text-base uppercase tracking-widest text-zinc-400 sm:text-lg">
+              <p className="mt-1 text-lg text-zinc-200 sm:text-xl">Use the same room ID to join friends in the same world.</p>
+              <label htmlFor="onboarding-room-id" className="mt-4 block text-base uppercase tracking-widest text-zinc-200 sm:text-lg">
                 Room ID
               </label>
               <input
@@ -631,7 +627,7 @@ export function OnboardingOverlay({
                 }}
                 disabled={isClosingRoomStrip}
                 maxLength={24}
-                className="mt-2 w-full rounded-xl border border-sky-100/20 bg-black/40 px-4 py-3 text-xl text-zinc-100 outline-none transition-colors duration-75 ease-out focus:border-sky-300/60 focus:ring-2 focus:ring-sky-300/40 disabled:cursor-not-allowed disabled:opacity-70 sm:text-2xl"
+                className="mt-2 w-full rounded-xl border border-sky-100/45 bg-black/52 px-4 py-3 text-xl text-zinc-50 outline-none transition-colors duration-75 ease-out focus:border-sky-300/85 focus:ring-2 focus:ring-sky-300/50 disabled:cursor-not-allowed disabled:opacity-70 sm:text-2xl"
                 placeholder="example-room-01"
               />
               <div className="min-h-6 pt-2 text-base text-rose-300 sm:text-lg">{roomError ?? ''}</div>
@@ -644,7 +640,7 @@ export function OnboardingOverlay({
                   type="button"
                   onClick={handleRoomNo}
                   disabled={isClosingRoomStrip}
-                  className="rounded-xl border border-zinc-100/65 bg-zinc-100/18 px-4 py-2 text-base font-semibold text-zinc-50 shadow-[0_2px_10px_rgba(0,0,0,0.28)] transition-colors duration-75 ease-out hover:bg-zinc-100/28 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/80 disabled:cursor-not-allowed disabled:opacity-70 sm:text-lg"
+                  className="rounded-xl border-2 border-zinc-50/95 bg-zinc-100/55 px-4 py-2 text-base font-semibold text-slate-900 shadow-[0_2px_10px_rgba(0,0,0,0.34)] transition-colors duration-75 ease-out hover:bg-zinc-100/70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:cursor-not-allowed disabled:opacity-70 sm:text-lg"
                 >
                   No
                 </button>
@@ -661,7 +657,7 @@ export function OnboardingOverlay({
                 type="button"
                 onClick={handleBack}
                 disabled={isClosingRoomStrip}
-                className="mt-3 w-full rounded-xl border border-cyan-100/75 bg-cyan-200/15 px-4 py-2 text-base font-semibold uppercase tracking-wider text-cyan-50 shadow-[0_2px_10px_rgba(0,0,0,0.28)] transition-colors duration-75 ease-out hover:bg-cyan-200/24 disabled:cursor-not-allowed disabled:opacity-70 sm:text-lg"
+                className="mt-3 w-full rounded-xl border-2 border-cyan-100 bg-cyan-300/45 px-4 py-2 text-base font-semibold uppercase tracking-wider text-cyan-50 shadow-[0_2px_10px_rgba(0,0,0,0.34)] transition-colors duration-75 ease-out hover:bg-cyan-300/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-100 disabled:cursor-not-allowed disabled:opacity-70 sm:text-lg"
               >
                 Back
               </button>

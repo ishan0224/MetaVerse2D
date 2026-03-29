@@ -7,9 +7,10 @@ import {
   sendWebRTCOffer,
 } from '@/network';
 import type { WebRTCIceCandidate, WebRTCSessionDescription } from '@/network/socket/socketClient';
+import { webEnv } from '@/config/env';
 
 const RTC_CONFIG = {
-  iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+  iceServers: webEnv.webrtcIceServers,
 };
 
 class RTCManager {

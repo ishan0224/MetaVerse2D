@@ -23,6 +23,11 @@ Rules:
 - Authoritative snapshots include optional `avatarId` and `avatarUrl` so remote clients can render the selected sprite avatar with image fallback behavior.
 - `rtcManager` handles WebRTC peer connections and media lifecycle in the network layer.
 - Socket.IO is used only for signaling (`webrtc:offer`, `webrtc:answer`, `webrtc:ice-candidate`), while audio flows peer-to-peer over WebRTC.
+- WebRTC ICE server config is env-driven:
+  - `NEXT_PUBLIC_WEBRTC_STUN_URLS` (comma-separated STUN URLs)
+  - `NEXT_PUBLIC_WEBRTC_TURN_URLS` (comma-separated TURN URLs)
+  - `NEXT_PUBLIC_WEBRTC_TURN_USERNAME`
+  - `NEXT_PUBLIC_WEBRTC_TURN_CREDENTIAL`
 - Voice connection targeting is automatic and proximity-driven by game orchestration; no manual peer selection UI is used at runtime.
 - `rtcManager` exposes peer playback controls (`setPeerVolume`, `setPeerMuted`) and local outbound mic control (`setLocalMicEnabled`) for game-layer orchestration.
 - UI lifecycle messaging (connecting/joining/mic states) may subscribe to transport and media readiness signals but should keep presentation concerns in `components` + `lib` state stores.
