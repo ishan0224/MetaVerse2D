@@ -1,12 +1,22 @@
 import { computeNearbyPlayers, type NearbyPlayersMap, type Player } from '@metaverse2d/shared';
 
-const DEFAULT_PROXIMITY_THRESHOLD = 220;
+const DEFAULT_PROXIMITY_ENTER_THRESHOLD = 200;
+const DEFAULT_PROXIMITY_EXIT_THRESHOLD = 250;
 
 export class ProximitySystem {
   private readonly roomProximity = new Map<string, NearbyPlayersMap>();
 
-  public updateRoom(roomId: string, players: Player[], threshold = DEFAULT_PROXIMITY_THRESHOLD): NearbyPlayersMap {
-    const proximity = computeNearbyPlayers(players, threshold);
+  public updateRoom(
+    roomId: string,
+    players: Player[],
+    enterThreshold = DEFAULT_PROXIMITY_ENTER_THRESHOLD,
+    exitThreshold = DEFAULT_PROXIMITY_EXIT_THRESHOLD,
+  ): NearbyPlayersMap {
+    const previousProximity = this.roomProximity.get(roomId) ?? {};
+    const proximity = computeNearbyPlayers(players, enterThreshold, {
+      exitThreshold,
+      previousProximity,
+    });
     if (players.length === 0) {
       this.roomProximity.delete(roomId);
       return proximity;

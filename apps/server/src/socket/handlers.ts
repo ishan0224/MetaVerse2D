@@ -75,6 +75,10 @@ const playerManager = new PlayerManager();
 const proximitySystem = new ProximitySystem();
 const playerPersistenceService = new PlayerPersistenceService();
 const socketPersistenceUserIds = new Map<string, string>();
+const dirtyScopeIds = new Set<string>();
+const BROADCAST_TICK_MS = 50;
+let broadcastTickInterval: ReturnType<typeof setInterval> | null = null;
+let activeIORef: SocketIOServer | null = null;
 
 function buildPlayersUpdatePayload(scopeId: string): PlayersUpdatePayload {
   const roomPlayers = playerManager.getPlayersInScope(scopeId);
@@ -97,7 +101,30 @@ function buildPlayersUpdatePayload(scopeId: string): PlayersUpdatePayload {
   };
 }
 
+function broadcastDirtyScopes(): void {
+  if (dirtyScopeIds.size === 0 || !activeIORef) {
+    return;
+  }
+
+  const scopeIds = Array.from(dirtyScopeIds);
+  dirtyScopeIds.clear();
+  for (const scopeId of scopeIds) {
+    activeIORef.to(scopeId).emit(PLAYERS_UPDATE_EVENT, buildPlayersUpdatePayload(scopeId));
+  }
+}
+
+function ensureBroadcastTick(): void {
+  if (broadcastTickInterval) {
+    return;
+  }
+
+  broadcastTickInterval = setInterval(broadcastDirtyScopes, BROADCAST_TICK_MS);
+}
+
 export function registerSocketHandlers(io: SocketIOServer, socket: Socket): void {
+  activeIORef = io;
+  ensureBroadcastTick();
+
   const authUser = getSocketAuthUser(socket);
   if (!authUser) {
     socket.disconnect(true);
@@ -221,7 +248,7 @@ export function registerSocketHandlers(io: SocketIOServer, socket: Socket): void
     }
 
     const scopeId = buildScopeId(updatedPlayer.worldId, updatedPlayer.roomId);
-    io.to(scopeId).emit(PLAYERS_UPDATE_EVENT, buildPlayersUpdatePayload(scopeId));
+    dirtyScopeIds.add(scopeId);
   });
 
   socket.on('disconnect', () => {
@@ -248,6 +275,10 @@ export function registerSocketHandlers(io: SocketIOServer, socket: Socket): void
   });
 
   socket.on(WEBRTC_OFFER_EVENT, (payload: WebRTCOfferPayload) => {
+    if (!isValidTargetId(payload?.targetId) || !isSessionDescriptionPayload(payload?.offer)) {
+      return;
+    }
+
     relayWebRTCSignal(socket.id, payload?.targetId, WEBRTC_OFFER_EVENT, {
       fromId: socket.id,
       offer: payload?.offer,
@@ -255,6 +286,10 @@ export function registerSocketHandlers(io: SocketIOServer, socket: Socket): void
   });
 
   socket.on(WEBRTC_ANSWER_EVENT, (payload: WebRTCAnswerPayload) => {
+    if (!isValidTargetId(payload?.targetId) || !isSessionDescriptionPayload(payload?.answer)) {
+      return;
+    }
+
     relayWebRTCSignal(socket.id, payload?.targetId, WEBRTC_ANSWER_EVENT, {
       fromId: socket.id,
       answer: payload?.answer,
@@ -262,6 +297,10 @@ export function registerSocketHandlers(io: SocketIOServer, socket: Socket): void
   });
 
   socket.on(WEBRTC_ICE_CANDIDATE_EVENT, (payload: WebRTCIceCandidateRelayPayload) => {
+    if (!isValidTargetId(payload?.targetId) || !isIceCandidatePayload(payload?.candidate)) {
+      return;
+    }
+
     relayWebRTCSignal(socket.id, payload?.targetId, WEBRTC_ICE_CANDIDATE_EVENT, {
       fromId: socket.id,
       candidate: payload?.candidate,
@@ -348,4 +387,63 @@ function normalizeRoomId(roomId: string | undefined): string {
 
 function buildScopeId(worldId: string, roomId: string): string {
   return `${worldId}::${roomId}`;
+}
+
+function isValidTargetId(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function isSessionDescriptionPayload(value: unknown): value is SessionDescriptionPayload {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const candidate = value as Partial<SessionDescriptionPayload>;
+  const validType =
+    candidate.type === 'offer' ||
+    candidate.type === 'answer' ||
+    candidate.type === 'pranswer' ||
+    candidate.type === 'rollback';
+  if (!validType) {
+    return false;
+  }
+
+  if (candidate.sdp !== undefined && typeof candidate.sdp !== 'string') {
+    return false;
+  }
+
+  return true;
+}
+
+function isIceCandidatePayload(value: unknown): value is IceCandidatePayload {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const candidate = value as Partial<IceCandidatePayload>;
+  if (candidate.candidate !== undefined && typeof candidate.candidate !== 'string') {
+    return false;
+  }
+
+  if (candidate.sdpMid !== undefined && candidate.sdpMid !== null && typeof candidate.sdpMid !== 'string') {
+    return false;
+  }
+
+  if (
+    candidate.sdpMLineIndex !== undefined &&
+    candidate.sdpMLineIndex !== null &&
+    typeof candidate.sdpMLineIndex !== 'number'
+  ) {
+    return false;
+  }
+
+  if (
+    candidate.usernameFragment !== undefined &&
+    candidate.usernameFragment !== null &&
+    typeof candidate.usernameFragment !== 'string'
+  ) {
+    return false;
+  }
+
+  return true;
 }

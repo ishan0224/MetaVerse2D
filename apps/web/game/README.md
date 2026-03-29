@@ -29,8 +29,11 @@ Rules:
 - Proximity detection and voice transport are separated: proximity is consumed from server state, WebRTC stays in `network/rtc`.
 - Voice is fully proximity-driven at runtime (no manual target/connect controls in UI flow).
 - Voice orchestration also manages distance-based playback attenuation and local mic modes (`MUTED`, `PUSH_TO_TALK`, `ALWAYS_ON`).
+- Camera intent is user-controlled and independent from proximity; proximity only controls which peers are connected/eligible for remote video bubbles.
+- Proximity video bubbles are driven by nearby-player signal plus remote live-video availability; render anchoring above players is handled through web overlay state, not Phaser networking logic.
 - Keyboard controls:
   - `M` cycles `MUTED -> PUSH_TO_TALK -> ALWAYS_ON -> MUTED`.
+  - `V` toggles local camera on/off.
   - `Space` sets effective mode to `PUSH_TO_TALK` on press and holds transmit while pressed.
   - Keyboard voice input bindings are mounted independently of optional voice UI panels.
 - Per-remote-player playback mute/unmute is controlled in UI state and applied in real time.

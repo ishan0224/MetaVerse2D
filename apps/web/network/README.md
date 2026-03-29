@@ -23,6 +23,17 @@ Rules:
 - Authoritative snapshots include optional `avatarId` and `avatarUrl` so remote clients can render the selected sprite avatar with image fallback behavior.
 - `rtcManager` handles WebRTC peer connections and media lifecycle in the network layer.
 - Socket.IO is used only for signaling (`webrtc:offer`, `webrtc:answer`, `webrtc:ice-candidate`), while audio flows peer-to-peer over WebRTC.
+- The same signaling path is used for proximity audio and proximity video media tracks (P2P mesh, no SFU).
 - Voice connection targeting is automatic and proximity-driven by game orchestration; no manual peer selection UI is used at runtime.
 - `rtcManager` exposes peer playback controls (`setPeerVolume`, `setPeerMuted`) and local outbound mic control (`setLocalMicEnabled`) for game-layer orchestration.
+- `rtcManager` also exposes camera/media APIs and a remote peer media subscription surface for UI video overlays.
+- Local camera state is user-controlled (keyboard `V` toggle or camera UI control); proximity does not force camera intent on/off.
+- Proximity still gates active peer connection lifecycle and therefore remote bubble visibility in gameplay.
+- Camera OFF unpublishes outbound video (`replaceTrack(null)` + renegotiation when required) so remote peers do not keep stale/frozen frames.
+- Camera toggles are applied with last-write-wins transition coalescing, so rapid spam converges to final intent without requiring proximity reconnect.
+- Media sender/transceiver slots are kept stable per connection (audio/video) to reduce SDP m-line churn during repeated camera publish/unpublish cycles.
+- ICE server configuration is environment-driven:
+  - `NEXT_PUBLIC_RTC_ICE_SERVER_URLS` (comma-separated)
+  - `NEXT_PUBLIC_RTC_ICE_SERVER_USERNAME` (optional)
+  - `NEXT_PUBLIC_RTC_ICE_SERVER_CREDENTIAL` (optional)
 - UI lifecycle messaging (connecting/joining/mic states) may subscribe to transport and media readiness signals but should keep presentation concerns in `components` + `lib` state stores.

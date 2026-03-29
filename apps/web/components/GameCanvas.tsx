@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { CameraModeCircle } from '@/components/CameraModeCircle';
 import { CircularMinimap } from '@/components/CircularMinimap';
 import { JoinStatusOverlay } from '@/components/JoinStatusOverlay';
 import { MicModeCircle } from '@/components/MicModeCircle';
@@ -10,12 +11,18 @@ import {
   OnboardingOverlay,
   type OnboardingStep,
 } from '@/components/OnboardingOverlay';
+import { ProximityVideoOverlay } from '@/components/ProximityVideoOverlay';
 import { TopRightStatusCluster } from '@/components/TopRightStatusCluster';
 import { VoiceKeyboardBindings } from '@/components/VoiceKeyboardBindings';
 import { ENABLE_TEST_MINIMAP } from '@/config/features';
 import { DEFAULT_AVATAR_ID, normalizeAvatarId } from '@/game/config/characterSpriteConfig';
 import { WORLD_CONFIG } from '@/game/config/worldConfig';
-import { resetVoiceControlState } from '@/game/systems/voiceControlStore';
+import {
+  resetVoiceControlState,
+  setCameraEnabled,
+  setCameraPermissionStatus,
+} from '@/game/systems/voiceControlStore';
+import { resetProximityVideoOverlayState } from '@/lib/proximityVideoOverlayStore';
 import {
   resetRuntimeUiState,
   setJoinUiPhase,
@@ -113,6 +120,7 @@ export function GameCanvas() {
       console.error('failed to initialize auth session', error);
     });
     resetVoiceControlState();
+    resetProximityVideoOverlayState();
     resetRuntimeUiState();
     setIsGameReady(false);
     setHandoffState('SCREENSHOT_VISIBLE');
@@ -138,6 +146,7 @@ export function GameCanvas() {
       }
 
       resetVoiceControlState();
+      resetProximityVideoOverlayState();
       resetRuntimeUiState();
     };
   }, []);
@@ -215,7 +224,10 @@ export function GameCanvas() {
     }
 
     resetVoiceControlState();
+    resetProximityVideoOverlayState();
     resetRuntimeUiState();
+    setCameraPermissionStatus('IDLE');
+    setCameraEnabled(false);
     setSocketUiStatus('CONNECTING');
     setJoinUiPhase('CONNECTING');
     setMicPermissionStatus('IDLE');
@@ -332,10 +344,14 @@ export function GameCanvas() {
 
         if (result === 'granted') {
           setMicPermissionStatus('GRANTED');
+          setCameraPermissionStatus('IDLE');
+          setCameraEnabled(false);
           setJoinUiPhase('READY');
           return;
         }
 
+        setCameraPermissionStatus('IDLE');
+        setCameraEnabled(false);
         setMicPermissionStatus('BLOCKED');
         setJoinUiPhase('MIC_BLOCKED');
       });
@@ -365,6 +381,7 @@ export function GameCanvas() {
 
       rtcManager.destroy();
       resetVoiceControlState();
+      resetProximityVideoOverlayState();
       resetRuntimeUiState();
     };
   }, [isGameReady, joinIdentity]);
@@ -411,10 +428,12 @@ export function GameCanvas() {
           onVisualStateChange={handleOnboardingVisualStateChange}
         />
       ) : null}
+      {hasJoinedFlowStarted ? <ProximityVideoOverlay /> : null}
       {hasJoinedFlowStarted ? <VoiceKeyboardBindings /> : null}
       {hasJoinedFlowStarted ? <TopRightStatusCluster /> : null}
       {hasJoinedFlowStarted ? <JoinStatusOverlay /> : null}
       {hasJoinedFlowStarted ? <MicModeCircle placement="top-right-below" /> : null}
+      {hasJoinedFlowStarted ? <CameraModeCircle /> : null}
       {hasJoinedFlowStarted && ENABLE_TEST_MINIMAP ? <CircularMinimap /> : null}
     </div>
   );

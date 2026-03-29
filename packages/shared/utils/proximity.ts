@@ -9,7 +9,13 @@ export type NearbyPlayersMap = Record<string, string[]>;
 export function computeNearbyPlayers(
   players: ProximityPlayer[],
   threshold: number,
+  options?: {
+    exitThreshold?: number;
+    previousProximity?: NearbyPlayersMap;
+  },
 ): NearbyPlayersMap {
+  const exitThreshold = options?.exitThreshold ?? threshold;
+  const previousProximity = options?.previousProximity ?? {};
   const orderedPlayers = [...players].sort((left, right) => left.id.localeCompare(right.id));
   const nearbyByPlayer = new Map<string, Set<string>>();
 
@@ -24,7 +30,11 @@ export function computeNearbyPlayers(
       const otherPlayer = orderedPlayers[nextIndex];
       const distance = Math.hypot(currentPlayer.x - otherPlayer.x, currentPlayer.y - otherPlayer.y);
 
-      if (distance > threshold) {
+      const wasNearby =
+        previousProximity[currentPlayer.id]?.includes(otherPlayer.id) ?? false;
+      const activeThreshold = wasNearby ? exitThreshold : threshold;
+
+      if (distance > activeThreshold) {
         continue;
       }
 

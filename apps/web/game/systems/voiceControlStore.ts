@@ -1,4 +1,5 @@
 export type VoiceMode = 'MUTED' | 'PUSH_TO_TALK' | 'ALWAYS_ON';
+export type CameraPermissionStatus = 'IDLE' | 'REQUESTING' | 'GRANTED' | 'BLOCKED';
 
 export type VoiceUIRemotePlayer = {
   id: string;
@@ -7,6 +8,8 @@ export type VoiceUIRemotePlayer = {
 
 type VoiceControlState = {
   mode: VoiceMode;
+  cameraEnabled: boolean;
+  cameraPermissionStatus: CameraPermissionStatus;
   keyboardPushToTalkPressed: boolean;
   uiPushToTalkPressed: boolean;
   mutedRemotePlayerIds: Record<string, boolean>;
@@ -15,6 +18,8 @@ type VoiceControlState = {
 
 const DEFAULT_STATE: VoiceControlState = {
   mode: 'PUSH_TO_TALK',
+  cameraEnabled: false,
+  cameraPermissionStatus: 'IDLE',
   keyboardPushToTalkPressed: false,
   uiPushToTalkPressed: false,
   mutedRemotePlayerIds: {},
@@ -44,6 +49,34 @@ export function setVoiceMode(mode: VoiceMode): void {
   state = {
     ...state,
     mode,
+  };
+  emit();
+}
+
+export function setCameraEnabled(enabled: boolean): void {
+  if (state.cameraEnabled === enabled) {
+    return;
+  }
+
+  state = {
+    ...state,
+    cameraEnabled: enabled,
+  };
+  emit();
+}
+
+export function toggleCameraEnabled(): void {
+  setCameraEnabled(!state.cameraEnabled);
+}
+
+export function setCameraPermissionStatus(status: CameraPermissionStatus): void {
+  if (state.cameraPermissionStatus === status) {
+    return;
+  }
+
+  state = {
+    ...state,
+    cameraPermissionStatus: status,
   };
   emit();
 }

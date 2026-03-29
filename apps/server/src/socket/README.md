@@ -15,3 +15,4 @@ Rules:
 - Spawn selection is server-authoritative and center-first per selected world region, with collision-safe fallback if center is blocked.
 - Movement events must remain DB-free (in-memory only); persistence writes occur on disconnect via service layer with graceful failure handling.
 - Never authorize by client-provided `userId` or player payload; authorization source is verified JWT identity only.
+- WebRTC signaling events are transport-only and scope-gated to same `(worldId, roomId)` peers; media (audio/video) remains peer-to-peer.

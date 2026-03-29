@@ -1,4 +1,4 @@
-import { getDbClient } from '../db/client';
+import { type DbClient,getDbClient } from '../db/client';
 import { getPlayerStateByUserId, upsertPlayerState } from '../db/queries/playerState';
 import {
   createUser,
@@ -39,6 +39,9 @@ type ResolveUserFromAuthInput = {
   avatarUrl?: string;
 };
 
+const USERNAME_MAX_LENGTH = 32;
+const USERNAME_FALLBACK_MAX_ATTEMPTS = 12;
+
 export class PlayerPersistenceService {
   public isEnabled(): boolean {
     return getDbClient() !== null;
@@ -57,15 +60,24 @@ export class PlayerPersistenceService {
     if (!normalizedAuthUserId || !normalizedEmail) {
       return null;
     }
-    const normalizedUsername = normalizeUsername(input.username, normalizedEmail);
+    const requestedUsername = normalizeRequestedUsername(input.username);
     const normalizedAvatarUrl = input.avatarUrl?.trim() || undefined;
 
     try {
       const existingUser = await getUserByAuthUserId(db, normalizedAuthUserId);
+      const preferredUsername = existingUser
+        ? requestedUsername ?? existingUser.username
+        : requestedUsername ?? deriveDefaultUsername(normalizedEmail);
+      const resolvedUsername = await resolveAvailableUsername(
+        db,
+        normalizedAuthUserId,
+        preferredUsername,
+        existingUser?.username,
+      );
+
       if (existingUser) {
-        const resolvedUsername = normalizedUsername || existingUser.username;
         const resolvedAvatarUrl = normalizedAvatarUrl ?? existingUser.avatarUrl ?? undefined;
-        const upsertedUser = await createUser(db, {
+        const upsertedUser = await createUserWithUsernameFallback(db, {
           authUserId: normalizedAuthUserId,
           email: normalizedEmail,
           username: resolvedUsername,
@@ -84,10 +96,10 @@ export class PlayerPersistenceService {
         };
       }
 
-      const createdUser = await createUser(db, {
+      const createdUser = await createUserWithUsernameFallback(db, {
         authUserId: normalizedAuthUserId,
         email: normalizedEmail,
-        username: normalizedUsername,
+        username: resolvedUsername,
         avatarUrl: normalizedAvatarUrl,
       });
       if (!createdUser) {
@@ -238,16 +250,140 @@ export class PlayerPersistenceService {
   }
 }
 
-function normalizeUsername(username: string | undefined, email: string): string {
+function normalizeRequestedUsername(username: string | undefined): string | undefined {
   const trimmed = username?.trim();
-  if (trimmed) {
-    return trimmed.slice(0, 32);
+  if (!trimmed) {
+    return undefined;
   }
 
+  return trimmed.slice(0, USERNAME_MAX_LENGTH);
+}
+
+function deriveDefaultUsername(email: string): string {
   const emailPrefix = email.split('@')[0]?.trim();
   if (emailPrefix) {
-    return emailPrefix.slice(0, 32);
+    return emailPrefix.slice(0, USERNAME_MAX_LENGTH);
   }
 
   return 'player';
+}
+
+async function resolveAvailableUsername(
+  db: DbClient,
+  authUserId: string,
+  preferredUsername: string,
+  existingUsername: string | undefined,
+): Promise<string> {
+  const normalizedPreferred = normalizeUsername(preferredUsername);
+  const preferredOwner = await getUserByUsername(db, normalizedPreferred);
+  if (!preferredOwner || preferredOwner.authUserId === authUserId) {
+    return normalizedPreferred;
+  }
+
+  const normalizedExisting = existingUsername ? normalizeUsername(existingUsername) : null;
+  if (normalizedExisting) {
+    const existingOwner = await getUserByUsername(db, normalizedExisting);
+    if (!existingOwner || existingOwner.authUserId === authUserId) {
+      return normalizedExisting;
+    }
+  }
+
+  for (let attempt = 1; attempt <= USERNAME_FALLBACK_MAX_ATTEMPTS; attempt += 1) {
+    const candidate = buildUniqueUsername(normalizedPreferred, authUserId, attempt);
+    const owner = await getUserByUsername(db, candidate);
+    if (!owner || owner.authUserId === authUserId) {
+      return candidate;
+    }
+  }
+
+  return buildUniqueUsername(normalizedPreferred, authUserId, Date.now());
+}
+
+async function createUserWithUsernameFallback(
+  db: DbClient,
+  input: {
+    authUserId: string;
+    email: string;
+    username: string;
+    avatarUrl?: string;
+  },
+): Promise<Awaited<ReturnType<typeof createUser>>> {
+  let candidateUsername = normalizeUsername(input.username);
+  for (let attempt = 1; attempt <= USERNAME_FALLBACK_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      return await createUser(db, {
+        ...input,
+        username: candidateUsername,
+      });
+    } catch (error) {
+      if (!isUsernameUniqueViolation(error)) {
+        throw error;
+      }
+
+      candidateUsername = buildUniqueUsername(input.username, input.authUserId, attempt);
+    }
+  }
+
+  return createUser(db, {
+    ...input,
+    username: buildUniqueUsername(input.username, input.authUserId, Date.now()),
+  });
+}
+
+function normalizeUsername(username: string): string {
+  const trimmed = username.trim();
+  if (!trimmed) {
+    return 'player';
+  }
+
+  return trimmed.slice(0, USERNAME_MAX_LENGTH);
+}
+
+function buildUniqueUsername(baseUsername: string, authUserId: string, attemptSeed: number): string {
+  const normalizedBase = normalizeUsername(baseUsername);
+  const authToken =
+    authUserId
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '')
+      .slice(0, 6) || 'user';
+  const attemptSuffix = attemptSeed > 1 ? String(attemptSeed).slice(-2) : '';
+  const suffix = `_${authToken}${attemptSuffix}`;
+  const baseMaxLength = Math.max(1, USERNAME_MAX_LENGTH - suffix.length);
+  return `${normalizedBase.slice(0, baseMaxLength)}${suffix}`;
+}
+
+function isUsernameUniqueViolation(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+
+  if (matchesUsernameUniqueViolation(error)) {
+    return true;
+  }
+
+  const maybeCause = (error as { cause?: unknown }).cause;
+  return matchesUsernameUniqueViolation(maybeCause);
+}
+
+function matchesUsernameUniqueViolation(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+
+  const maybePgError = error as {
+    code?: string;
+    constraint?: string;
+    message?: string;
+  };
+
+  if (maybePgError.code !== '23505') {
+    return false;
+  }
+
+  if (maybePgError.constraint === 'users_username_unique_idx') {
+    return true;
+  }
+
+  const normalizedMessage = maybePgError.message?.toLowerCase() ?? '';
+  return normalizedMessage.includes('users_username_unique_idx');
 }

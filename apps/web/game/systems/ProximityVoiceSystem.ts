@@ -3,10 +3,12 @@ import { getVoiceControlState, type VoiceMode } from '@/game/systems/voiceContro
 
 type ProximityVoiceAdapter = {
   createConnection: (targetId: string) => Promise<void>;
+  hasActiveConnection: (targetId: string) => boolean;
   closeConnection: (targetId: string) => void;
   setPeerVolume: (targetId: string, volume: number) => void;
   setPeerMuted: (targetId: string, muted: boolean) => void;
   setLocalMicEnabled: (enabled: boolean) => void;
+  setLocalCameraEnabled: (enabled: boolean) => void;
 };
 
 type Position2D = {
@@ -36,7 +38,8 @@ type ProximityVoiceUpdateInput = {
   remotePlayers: RemoteVoicePlayer[];
 };
 
-const DEFAULT_DISCONNECT_DEBOUNCE_MS = 300;
+const DEFAULT_DISCONNECT_DEBOUNCE_MS = 1500;
+const RECONNECT_RETRY_COOLDOWN_MS = 1200;
 
 export class ProximityVoiceSystem {
   private readonly adapter: ProximityVoiceAdapter;
@@ -48,10 +51,12 @@ export class ProximityVoiceSystem {
   private nearbySet = new Set<string>();
   private readonly activeConnections = new Set<string>();
   private readonly disconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly reconnectRetryAtByPeer = new Map<string, number>();
   private readonly currentVolumeByPeer = new Map<string, number>();
   private mutedByPeer: Record<string, boolean> = {};
   private localPlayerId: string | null = null;
   private micEnabled = false;
+  private cameraEnabled = false;
 
   public constructor(options: ProximityVoiceSystemOptions) {
     this.adapter = options.adapter;
@@ -106,6 +111,7 @@ export class ProximityVoiceSystem {
       }
 
       if (this.activeConnections.has(playerId)) {
+        this.reconnectRetryAtByPeer.delete(playerId);
         continue;
       }
 
@@ -113,8 +119,36 @@ export class ProximityVoiceSystem {
       if (shouldInitiateConnection(localPlayerId, playerId)) {
         void this.adapter.createConnection(playerId).catch(() => {
           this.activeConnections.delete(playerId);
+          this.reconnectRetryAtByPeer.set(playerId, Date.now() + RECONNECT_RETRY_COOLDOWN_MS);
         });
       }
+    }
+
+    for (const playerId of nextNearbySet) {
+      if (!this.activeConnections.has(playerId)) {
+        continue;
+      }
+
+      if (!shouldInitiateConnection(localPlayerId, playerId)) {
+        this.reconnectRetryAtByPeer.delete(playerId);
+        continue;
+      }
+
+      if (this.adapter.hasActiveConnection(playerId)) {
+        this.reconnectRetryAtByPeer.delete(playerId);
+        continue;
+      }
+
+      const nowMs = Date.now();
+      const retryAt = this.reconnectRetryAtByPeer.get(playerId) ?? 0;
+      if (nowMs < retryAt) {
+        continue;
+      }
+
+      this.reconnectRetryAtByPeer.set(playerId, nowMs + RECONNECT_RETRY_COOLDOWN_MS);
+      void this.adapter.createConnection(playerId).catch(() => {
+        return;
+      });
     }
 
     for (const playerId of this.activeConnections) {
@@ -130,18 +164,27 @@ export class ProximityVoiceSystem {
 
         this.adapter.closeConnection(playerId);
         this.activeConnections.delete(playerId);
+        this.reconnectRetryAtByPeer.delete(playerId);
       }, this.disconnectDebounceMs);
 
       this.disconnectTimers.set(playerId, disconnectTimer);
     }
 
     this.nearbySet = nextNearbySet;
+    const shouldEnableCamera = voiceState.cameraEnabled;
+    if (shouldEnableCamera !== this.cameraEnabled) {
+      this.adapter.setLocalCameraEnabled(shouldEnableCamera);
+      this.cameraEnabled = shouldEnableCamera;
+    }
+
     this.applyRemoteVoiceState(localPlayerPosition, remotePlayers, voiceState.mutedRemotePlayerIds);
   }
 
   public destroy(): void {
     this.adapter.setLocalMicEnabled(false);
     this.micEnabled = false;
+    this.adapter.setLocalCameraEnabled(false);
+    this.cameraEnabled = false;
     this.localPlayerId = null;
     this.resetConnections();
   }
@@ -156,6 +199,7 @@ export class ProximityVoiceSystem {
       this.adapter.closeConnection(playerId);
     }
     this.activeConnections.clear();
+    this.reconnectRetryAtByPeer.clear();
     this.currentVolumeByPeer.clear();
     this.mutedByPeer = {};
     this.nearbySet.clear();

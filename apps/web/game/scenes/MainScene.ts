@@ -17,6 +17,7 @@ import {
   FULL_MAP_TILEMAP_KEY,
   FULL_MAP_TILESET_ASSETS,
 } from '@/game/config/tilemapConfig';
+import { VIDEO_CONFIG } from '@/game/config/videoConfig';
 import { WORLD_CONFIG } from '@/game/config/worldConfig';
 import { Player } from '@/game/entities/Player';
 import { RemotePlayer } from '@/game/entities/RemotePlayer';
@@ -26,6 +27,7 @@ import { MultiplayerSystem } from '@/game/systems/MultiplayerSystem';
 import { ProximityVoiceSystem } from '@/game/systems/ProximityVoiceSystem';
 import { setVoiceUIRemotePlayers } from '@/game/systems/voiceControlStore';
 import { ensureCharacterAnimations } from '@/game/utils/characterAnimations';
+import { resetProximityVideoOverlayState, setProximityVideoOverlayPlayers } from '@/lib/proximityVideoOverlayStore';
 import { getRTCManager } from '@/network/rtc/rtcManager';
 
 const REMOTE_RENDER_DELAY_MS = 100;
@@ -64,6 +66,7 @@ export class MainScene extends Phaser.Scene {
   private mapWorldHeight: number = WORLD_CONFIG.height;
   private readonly bumpWarningCooldownByPlayerId = new Map<string, number>();
   private readonly motionSnapshotsByPlayerId = new Map<string, MotionSnapshot>();
+  private lastVideoOverlayUpdateAtMs = 0;
 
   public constructor() {
     super(MainScene.KEY);
@@ -116,6 +119,9 @@ export class MainScene extends Phaser.Scene {
         createConnection: async (targetId) => {
           await getRTCManager().createConnection(targetId);
         },
+        hasActiveConnection: (targetId) => {
+          return getRTCManager().hasActiveConnection(targetId);
+        },
         closeConnection: (targetId) => {
           getRTCManager().closeConnection(targetId);
         },
@@ -128,8 +134,11 @@ export class MainScene extends Phaser.Scene {
         setLocalMicEnabled: (enabled) => {
           getRTCManager().setLocalMicEnabled(enabled);
         },
+        setLocalCameraEnabled: (enabled) => {
+          getRTCManager().setLocalCameraEnabled(enabled);
+        },
       },
-      disconnectDebounceMs: 300,
+      disconnectDebounceMs: 1500,
     });
 
     this.cameras.main.startFollow(this.player.getSprite(), true, 1, 1);
@@ -146,6 +155,8 @@ export class MainScene extends Phaser.Scene {
       this.remotePlayers.clear();
       this.bumpWarningCooldownByPlayerId.clear();
       this.motionSnapshotsByPlayerId.clear();
+      this.lastVideoOverlayUpdateAtMs = 0;
+      resetProximityVideoOverlayState();
     });
   }
 
@@ -171,6 +182,80 @@ export class MainScene extends Phaser.Scene {
         name: player.name,
       })),
     );
+    this.updateProximityVideoOverlay(nowMs, localPlayerPosition, remotePlayers);
+  }
+
+  private updateProximityVideoOverlay(
+    nowMs: number,
+    localPlayerPosition: { x: number; y: number } | null,
+    remotePlayers: ReturnType<MultiplayerSystem['getRemotePlayers']>,
+  ): void {
+    if (nowMs - this.lastVideoOverlayUpdateAtMs < VIDEO_CONFIG.overlayUpdateIntervalMs) {
+      return;
+    }
+    this.lastVideoOverlayUpdateAtMs = nowMs;
+
+    if (!localPlayerPosition) {
+      setProximityVideoOverlayPlayers([]);
+      return;
+    }
+
+    const nearbyPlayerIds = this.multiplayerSystem.getLocalNearbyPlayerIds();
+    if (nearbyPlayerIds.length === 0) {
+      setProximityVideoOverlayPlayers([]);
+      return;
+    }
+
+    const camera = this.cameras.main;
+    const remotePlayerById = new Map(remotePlayers.map((player) => [player.id, player]));
+    const candidates: Array<{
+      id: string;
+      name: string;
+      screenX: number;
+      screenY: number;
+      distance: number;
+    }> = [];
+
+    for (const playerId of nearbyPlayerIds) {
+      const remoteEntity = this.remotePlayers.get(playerId);
+      const remoteSnapshot = remotePlayerById.get(playerId);
+      if (!remoteEntity || !remoteSnapshot) {
+        continue;
+      }
+
+      const remotePosition = remoteEntity.getPosition();
+      const distance = Math.hypot(
+        remotePosition.x - localPlayerPosition.x,
+        remotePosition.y - localPlayerPosition.y,
+      );
+
+      const screenX = (remotePosition.x - camera.worldView.x) * camera.zoom;
+      const screenY =
+        (remotePosition.y - VIDEO_CONFIG.bubbleOffsetWorldY - camera.worldView.y) * camera.zoom;
+      const normalizedX = screenX / camera.width;
+      const normalizedY = screenY / camera.height;
+
+      if (normalizedX < -0.25 || normalizedX > 1.25 || normalizedY < -0.25 || normalizedY > 1.25) {
+        continue;
+      }
+
+      candidates.push({
+        id: playerId,
+        name: remoteSnapshot.name,
+        screenX: clamp(normalizedX, 0.03, 0.97),
+        screenY: clamp(normalizedY, 0.05, 0.95),
+        distance,
+      });
+    }
+
+    candidates.sort((left, right) => {
+      if (Math.abs(left.distance - right.distance) > 0.01) {
+        return left.distance - right.distance;
+      }
+      return left.id.localeCompare(right.id);
+    });
+
+    setProximityVideoOverlayPlayers(candidates.slice(0, VIDEO_CONFIG.maxVisibleVideoPeers));
   }
 
   private syncPlayersFromServer(nowMs: number, inputState: InputState, deltaMs: number): void {
@@ -481,4 +566,8 @@ export class MainScene extends Phaser.Scene {
 
     return nextPosition;
   }
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
 }
