@@ -22,6 +22,13 @@
 
 :root {
   color-scheme: dark;
+  --ui-flow-glass-blur: 16px;
+  --ui-flow-glass-radius: 1rem;
+  --ui-flow-glass-bg-start: rgba(255, 255, 255, 0.2);
+  --ui-flow-glass-bg-end: rgba(255, 255, 255, 0.12);
+  --ui-flow-glass-border: rgba(255, 255, 255, 0.28);
+  --ui-flow-glass-shadow: 0 16px 42px rgba(2, 6, 23, 0.5);
+  --ui-flow-glass-fallback-bg: rgba(10, 16, 30, 0.86);
 }
 
 * {
@@ -104,4 +111,19 @@ body {
     -1px 1px 0 #000,
     1px 1px 0 #000,
     #474747 3px 5px 2px;
+}
+
+.ui-flow-box {
+  border-radius: var(--ui-flow-glass-radius);
+  border: 1px solid var(--ui-flow-glass-border);
+  background: linear-gradient(145deg, var(--ui-flow-glass-bg-start), var(--ui-flow-glass-bg-end));
+  box-shadow: var(--ui-flow-glass-shadow);
+  -webkit-backdrop-filter: blur(var(--ui-flow-glass-blur));
+  backdrop-filter: blur(var(--ui-flow-glass-blur));
+}
+
+@supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  .ui-flow-box {
+    background: var(--ui-flow-glass-fallback-bg);
+  }
 }

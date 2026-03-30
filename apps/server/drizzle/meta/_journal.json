@@ -15,6 +15,13 @@
       "when": 1774639169065,
       "tag": "0001_supabase_auth",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1774864992705,
+      "tag": "0002_neat_loners",
+      "breakpoints": true
     }
   ]
 }

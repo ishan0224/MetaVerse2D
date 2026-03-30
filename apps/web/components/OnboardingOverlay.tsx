@@ -1,8 +1,15 @@
 'use client';
 
 import {
+  normalizeEmail,
+  USERNAME_MAX_LENGTH,
+  validateEmailAddress,
+  validateUsername,
+} from '@metaverse2d/shared';
+import {
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -19,6 +26,7 @@ import {
   normalizeAvatarId,
 } from '@/game/config/characterSpriteConfig';
 import {
+  getAuthAccessToken,
   getAuthSessionState,
   initializeAuthSession,
   signInWithEmailPassword,
@@ -26,6 +34,8 @@ import {
   signUpWithEmailPassword,
   subscribeToAuthSession,
 } from '@/network/auth/authSession';
+import { checkEmailAvailability } from '@/network/auth/emailAvailabilityClient';
+import { upsertUserProfile } from '@/network/auth/userProfileClient';
 
 export type OnboardingStep = 'name' | 'avatar' | 'world' | 'roomConfirm';
 
@@ -56,12 +66,13 @@ type WorldOption = {
 
 type AuthMode = 'LOGIN' | 'SIGN_UP';
 
-const NAME_PATTERN = /^[A-Za-z0-9_ ]+$/;
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const ROOM_PATTERN = /^[A-Za-z0-9_-]+$/;
 const STRIP_EXIT_DURATION_MS = 220;
 const AVATAR_PREVIEW_SCALE = 7;
 const AVATAR_ANIMATION_MS = 110;
+const EMAIL_DEBOUNCE_MS = 400;
+
+type AvailabilityState = 'idle' | 'checking' | 'available' | 'taken' | 'error';
 
 const WORLD_OPTIONS: readonly WorldOption[] = [
   {
@@ -84,6 +95,12 @@ export function OnboardingOverlay({
   const [authMode, setAuthMode] = useState<AuthMode>('LOGIN');
   const [emailValue, setEmailValue] = useState('');
   const [passwordValue, setPasswordValue] = useState('');
+  const [emailTouched, setEmailTouched] = useState(false);
+  const [passwordTouched, setPasswordTouched] = useState(false);
+  const [usernameTouched, setUsernameTouched] = useState(false);
+  const [emailAvailabilityState, setEmailAvailabilityState] =
+    useState<AvailabilityState>('idle');
+  const [emailAvailabilityMessage, setEmailAvailabilityMessage] = useState<string | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
   const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
   const [avatarId, setAvatarId] = useState<AvatarId>(normalizeAvatarId(initialDraft.avatarId));
@@ -100,6 +117,10 @@ export function OnboardingOverlay({
 
   const roomInputRef = useRef<HTMLInputElement | null>(null);
   const closeTimerRef = useRef<number | null>(null);
+  const emailCacheRef = useRef<Map<string, boolean>>(new Map());
+  const emailRequestIdRef = useRef(0);
+  const emailDebounceTimerRef = useRef<number | null>(null);
+  const emailAbortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     void initializeAuthSession().catch((error) => {
@@ -130,6 +151,10 @@ export function OnboardingOverlay({
       if (closeTimerRef.current) {
         window.clearTimeout(closeTimerRef.current);
       }
+      if (emailDebounceTimerRef.current) {
+        window.clearTimeout(emailDebounceTimerRef.current);
+      }
+      emailAbortControllerRef.current?.abort();
     };
   }, []);
 
@@ -143,11 +168,127 @@ export function OnboardingOverlay({
     onVisualStateChange?.({ step, worldId });
   }, [onVisualStateChange, step, worldId]);
 
-  const canProceedFromName = isAuthPotentiallyValid(emailValue, passwordValue) && !isAuthSubmitting;
+  const usernameValidation = validateName(nameValue);
+  const emailInlineError = emailTouched ? getInlineEmailError(emailValue) : null;
+  const passwordInlineError = passwordTouched ? getInlinePasswordError(passwordValue) : null;
+  const usernameInlineError =
+    authMode === 'SIGN_UP' && usernameTouched
+      ? getInlineUsernameError(nameValue)
+      : null;
+  const shouldShowEmailAvailability =
+    authMode === 'SIGN_UP' && emailTouched && !emailInlineError;
+  const canProceedFromName =
+    isAuthPotentiallyValid(emailValue, passwordValue) &&
+    (authMode !== 'SIGN_UP' || usernameValidation.ok) &&
+    (authMode !== 'SIGN_UP' ||
+      (emailAvailabilityState !== 'checking' &&
+        emailAvailabilityState !== 'taken')) &&
+    !isAuthSubmitting;
   const canConfirmRoom = isRoomPotentiallyValid(roomId);
   const hasSavedSession = Boolean(authSession.accessToken && authSession.user?.email);
 
   const currentStepNumber = step === 'name' ? 1 : step === 'avatar' ? 2 : step === 'world' ? 3 : 4;
+
+  const clearPendingEmailCheck = useCallback(() => {
+    if (emailDebounceTimerRef.current) {
+      window.clearTimeout(emailDebounceTimerRef.current);
+      emailDebounceTimerRef.current = null;
+    }
+    emailAbortControllerRef.current?.abort();
+    emailAbortControllerRef.current = null;
+  }, []);
+
+  const runEmailAvailabilityCheck = useCallback(
+    async (
+      email: string,
+      signal?: AbortSignal,
+    ): Promise<{ ok: boolean; available: boolean; message?: string }> => {
+      const normalizedEmail = normalizeEmail(email);
+      const cachedAvailability = emailCacheRef.current.get(normalizedEmail);
+      if (typeof cachedAvailability === 'boolean') {
+        return { ok: true, available: cachedAvailability };
+      }
+
+      const result = await checkEmailAvailability(normalizedEmail, signal);
+      if (!result.ok) {
+        return { ok: false, available: false, message: result.message };
+      }
+
+      emailCacheRef.current.set(normalizedEmail, result.available);
+      return { ok: true, available: result.available };
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (authMode !== 'SIGN_UP') {
+      clearPendingEmailCheck();
+      setEmailAvailabilityState('idle');
+      setEmailAvailabilityMessage(null);
+      return;
+    }
+
+    const emailValidation = validateEmail(emailValue);
+    if (!emailValidation.ok) {
+      clearPendingEmailCheck();
+      setEmailAvailabilityState('idle');
+      setEmailAvailabilityMessage(null);
+      return;
+    }
+
+    const normalizedEmail = emailValidation.value;
+    const cachedAvailability = emailCacheRef.current.get(normalizedEmail);
+    if (typeof cachedAvailability === 'boolean') {
+      setEmailAvailabilityState(cachedAvailability ? 'available' : 'taken');
+      setEmailAvailabilityMessage(cachedAvailability ? 'Email available.' : 'Email is already registered.');
+      return;
+    }
+
+    const requestId = emailRequestIdRef.current + 1;
+    emailRequestIdRef.current = requestId;
+    clearPendingEmailCheck();
+    setEmailAvailabilityState('checking');
+    setEmailAvailabilityMessage('Checking email...');
+
+    emailDebounceTimerRef.current = window.setTimeout(() => {
+      const activeRequestId = requestId;
+      const abortController = new AbortController();
+      emailAbortControllerRef.current = abortController;
+
+      void runEmailAvailabilityCheck(normalizedEmail, abortController.signal)
+        .then((result) => {
+          if (emailRequestIdRef.current !== activeRequestId) {
+            return;
+          }
+
+          if (!result.ok) {
+            setEmailAvailabilityState('error');
+            setEmailAvailabilityMessage(result.message ?? 'Unable to verify email right now.');
+            return;
+          }
+
+          if (result.available) {
+            setEmailAvailabilityState('available');
+            setEmailAvailabilityMessage('Email available.');
+            return;
+          }
+
+          setEmailAvailabilityState('taken');
+          setEmailAvailabilityMessage('Email is already registered.');
+        })
+        .catch(() => {
+          if (emailRequestIdRef.current !== activeRequestId) {
+            return;
+          }
+          setEmailAvailabilityState('error');
+          setEmailAvailabilityMessage('Unable to verify email right now.');
+        });
+    }, EMAIL_DEBOUNCE_MS);
+
+    return () => {
+      clearPendingEmailCheck();
+    };
+  }, [authMode, clearPendingEmailCheck, emailValue, runEmailAvailabilityCheck]);
 
   const handleBack = () => {
     if (isClosingRoomStrip) {
@@ -183,6 +324,12 @@ export function OnboardingOverlay({
       return;
     }
 
+    setEmailTouched(true);
+    setPasswordTouched(true);
+    if (authMode === 'SIGN_UP') {
+      setUsernameTouched(true);
+    }
+
     const emailValidation = validateEmail(emailValue);
     if (!emailValidation.ok) {
       setAuthError(emailValidation.message);
@@ -196,24 +343,88 @@ export function OnboardingOverlay({
     }
 
     let resolvedName = deriveDisplayNameFromEmail(emailValidation.value);
-    if (nameValue.trim()) {
-      const nameValidation = validateName(nameValue);
-      if (!nameValidation.ok) {
-        setNameError(nameValidation.message);
+    if (authMode === 'SIGN_UP') {
+      if (emailAvailabilityState === 'checking') {
+        setAuthError('Checking email availability...');
         return;
       }
 
-      resolvedName = nameValidation.value;
+      if (emailAvailabilityState === 'taken') {
+        setAuthError('Email is already registered.');
+        return;
+      }
+
+      const emailAvailability = await runEmailAvailabilityCheck(emailValidation.value);
+      if (!emailAvailability.ok) {
+        const message = emailAvailability.message ?? 'Unable to verify email right now.';
+        setAuthError(message);
+        setEmailAvailabilityState('error');
+        setEmailAvailabilityMessage(message);
+        return;
+      }
+
+      if (!emailAvailability.available) {
+        setAuthError('Email is already registered.');
+        setEmailAvailabilityState('taken');
+        setEmailAvailabilityMessage('Email is already registered.');
+        emailCacheRef.current.set(emailValidation.value, false);
+        return;
+      }
+
+      const signUpNameValidation = validateName(nameValue);
+      if (!signUpNameValidation.ok) {
+        setNameError(formatDisplayNameValidationMessage(signUpNameValidation.message));
+        return;
+      }
+      resolvedName = signUpNameValidation.value;
+    } else if (nameValue.trim()) {
+      const loginNameValidation = validateName(nameValue);
+      if (!loginNameValidation.ok) {
+        setNameError(formatDisplayNameValidationMessage(loginNameValidation.message));
+        return;
+      }
+
+      resolvedName = loginNameValidation.value;
     }
 
     setAuthError(null);
     setNameError(null);
     setIsAuthSubmitting(true);
 
-    const authResult =
-      authMode === 'LOGIN'
+    const hasMatchingSession =
+      authMode === 'SIGN_UP' &&
+      Boolean(authSession.accessToken) &&
+      authSession.user?.email?.trim().toLowerCase() === emailValidation.value;
+
+    const authResult = hasMatchingSession
+      ? { ok: true, user: authSession.user ?? null }
+      : authMode === 'LOGIN'
         ? await signInWithEmailPassword(emailValidation.value, passwordValidation.value)
         : await signUpWithEmailPassword(emailValidation.value, passwordValidation.value);
+
+    if (authResult.ok && authMode === 'SIGN_UP') {
+      const accessToken = getAuthAccessToken();
+      if (!accessToken) {
+        setIsAuthSubmitting(false);
+        setAuthError('Authentication succeeded, but no active session is available yet.');
+        return;
+      }
+
+      const profileResult = await upsertUserProfile(accessToken, resolvedName);
+      if (!profileResult.ok) {
+        setIsAuthSubmitting(false);
+        if (profileResult.code === 'EMAIL_TAKEN' || profileResult.status === 409) {
+          setAuthError('Email is already registered.');
+          setEmailAvailabilityState('taken');
+          setEmailAvailabilityMessage('Email is already registered.');
+          emailCacheRef.current.set(emailValidation.value, false);
+          return;
+        }
+
+        setAuthError(profileResult.message);
+        return;
+      }
+    }
 
     setIsAuthSubmitting(false);
 
@@ -226,20 +437,44 @@ export function OnboardingOverlay({
     setStep('avatar');
   };
 
-  const continueWithSavedSession = () => {
+  const continueWithSavedSession = async () => {
     const sessionEmail = authSession.user?.email?.trim().toLowerCase();
     if (!authSession.accessToken || !sessionEmail) {
       return;
     }
 
     let resolvedName = deriveDisplayNameFromEmail(sessionEmail);
-    if (nameValue.trim()) {
-      const nameValidation = validateName(nameValue);
-      if (!nameValidation.ok) {
-        setNameError(nameValidation.message);
+    if (authMode === 'SIGN_UP') {
+      setUsernameTouched(true);
+      const signUpNameValidation = validateName(nameValue);
+      if (!signUpNameValidation.ok) {
+        setNameError(formatDisplayNameValidationMessage(signUpNameValidation.message));
         return;
       }
-      resolvedName = nameValidation.value;
+      resolvedName = signUpNameValidation.value;
+
+      setIsAuthSubmitting(true);
+      const profileResult = await upsertUserProfile(authSession.accessToken, resolvedName);
+      setIsAuthSubmitting(false);
+      if (!profileResult.ok) {
+        if (profileResult.code === 'EMAIL_TAKEN' || profileResult.status === 409) {
+          setAuthError('Email is already registered.');
+          setEmailAvailabilityState('taken');
+          setEmailAvailabilityMessage('Email is already registered.');
+          emailCacheRef.current.set(sessionEmail, false);
+          return;
+        }
+
+        setAuthError(profileResult.message);
+        return;
+      }
+    } else if (nameValue.trim()) {
+      const loginNameValidation = validateName(nameValue);
+      if (!loginNameValidation.ok) {
+        setNameError(formatDisplayNameValidationMessage(loginNameValidation.message));
+        return;
+      }
+      resolvedName = loginNameValidation.value;
     }
 
     setAuthError(null);
@@ -258,6 +493,15 @@ export function OnboardingOverlay({
         console.error('failed to sign out', error);
         setAuthError('Unable to sign out right now. Please retry.');
       });
+  };
+
+  const handleAuthModeChange = (nextMode: AuthMode) => {
+    setAuthMode(nextMode);
+    setAuthError(null);
+    setNameError(null);
+    setEmailAvailabilityState('idle');
+    setEmailAvailabilityMessage(null);
+    clearPendingEmailCheck();
   };
 
   const proceedFromAvatar = () => {
@@ -325,7 +569,7 @@ export function OnboardingOverlay({
             </span>
           </div>
 
-          <div className="onboarding-panel-in [contain:layout_paint] overflow-hidden rounded-2xl border border-sky-200/35 bg-[#0c1320]/82 shadow-[0_16px_42px_rgba(2,6,23,0.64)] backdrop-blur-[1.5px]">
+          <div className="ui-flow-box onboarding-panel-in [contain:layout_paint] overflow-hidden">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/15 px-5 py-3 sm:px-7">
               <span className="text-sm uppercase tracking-[0.18em] text-sky-100/90 sm:text-base">Onboarding</span>
               <span className="text-sm font-semibold text-sky-50/90 sm:text-base">Step {currentStepNumber} / 4</span>
@@ -340,7 +584,7 @@ export function OnboardingOverlay({
                   <div className="mt-5 grid grid-cols-2 gap-2 rounded-xl bg-black/42 p-1">
                     <button
                       type="button"
-                      onClick={() => setAuthMode('LOGIN')}
+                      onClick={() => handleAuthModeChange('LOGIN')}
                       className={`rounded-lg border px-3 py-2 text-sm font-semibold uppercase tracking-wider transition-colors duration-75 ease-out sm:text-base ${authMode === 'LOGIN'
                         ? 'border-cyan-100/85 bg-cyan-300 text-slate-950'
                         : 'border-white/40 text-zinc-100 hover:border-white/65 hover:bg-white/20'
@@ -350,7 +594,7 @@ export function OnboardingOverlay({
                     </button>
                     <button
                       type="button"
-                      onClick={() => setAuthMode('SIGN_UP')}
+                      onClick={() => handleAuthModeChange('SIGN_UP')}
                       className={`rounded-lg border px-3 py-2 text-sm font-semibold uppercase tracking-wider transition-colors duration-75 ease-out sm:text-base ${authMode === 'SIGN_UP'
                         ? 'border-cyan-100/85 bg-cyan-300 text-slate-950'
                         : 'border-white/40 text-zinc-100 hover:border-white/65 hover:bg-white/20'
@@ -368,6 +612,7 @@ export function OnboardingOverlay({
                     value={emailValue}
                     onChange={(event) => {
                       setEmailValue(event.target.value);
+                      setEmailTouched(true);
                       if (authError) {
                         setAuthError(null);
                       }
@@ -384,6 +629,15 @@ export function OnboardingOverlay({
                     placeholder="you@example.com"
                     autoComplete="email"
                   />
+                  <div className="min-h-6 pt-1 text-sm sm:text-base">
+                    {emailInlineError ? (
+                      <span className="text-rose-300">{emailInlineError}</span>
+                    ) : shouldShowEmailAvailability ? (
+                      <span className={resolveAvailabilityMessageClass(emailAvailabilityState)}>
+                        {emailAvailabilityMessage ?? ''}
+                      </span>
+                    ) : null}
+                  </div>
 
                   <label htmlFor="onboarding-password" className="mt-4 block text-base uppercase tracking-widest text-zinc-200 sm:text-lg">
                     Password
@@ -394,6 +648,7 @@ export function OnboardingOverlay({
                     value={passwordValue}
                     onChange={(event) => {
                       setPasswordValue(event.target.value);
+                      setPasswordTouched(true);
                       if (authError) {
                         setAuthError(null);
                       }
@@ -409,15 +664,21 @@ export function OnboardingOverlay({
                     placeholder={authMode === 'SIGN_UP' ? 'Create password (8+ chars)' : 'Enter password'}
                     autoComplete={authMode === 'SIGN_UP' ? 'new-password' : 'current-password'}
                   />
+                  <div className="min-h-6 pt-1 text-sm text-rose-300 sm:text-base">
+                    {passwordInlineError ?? ''}
+                  </div>
 
                   <label htmlFor="onboarding-name" className="mt-4 block text-base uppercase tracking-widest text-zinc-200 sm:text-lg">
-                    Display Name (Optional)
+                    {authMode === 'SIGN_UP' ? 'Display Name' : 'Display Name (Optional)'}
                   </label>
                   <input
                     id="onboarding-name"
                     value={nameValue}
                     onChange={(event) => {
                       setNameValue(event.target.value);
+                      if (authMode === 'SIGN_UP') {
+                        setUsernameTouched(true);
+                      }
                       if (nameError) {
                         setNameError(null);
                       }
@@ -428,13 +689,22 @@ export function OnboardingOverlay({
                         void proceedFromName();
                       }
                     }}
-                    maxLength={20}
+                    maxLength={USERNAME_MAX_LENGTH}
                     className="mt-2 w-full rounded-xl border border-sky-100/45 bg-black/52 px-4 py-3 text-xl text-zinc-50 outline-none transition-colors duration-75 ease-out focus:border-sky-300/85 focus:ring-2 focus:ring-sky-300/50 sm:text-2xl"
-                    placeholder="Defaults to email prefix"
+                    placeholder={authMode === 'SIGN_UP' ? 'Choose display name' : 'Defaults to email prefix'}
                     autoComplete="nickname"
                   />
+                  <div className="min-h-6 pt-1 text-sm sm:text-base">
+                    {authMode === 'SIGN_UP' ? (
+                      <span className={usernameInlineError ? 'text-rose-300' : 'text-zinc-300/85'}>
+                        {usernameInlineError ?? ''}
+                      </span>
+                    ) : (
+                      <span className="text-zinc-300/85">Optional.</span>
+                    )}
+                  </div>
 
-                  <div className="min-h-6 pt-2 text-base text-rose-300 sm:text-lg">{authError ?? nameError ?? ''}</div>
+                  <div className="min-h-6 pt-2 text-base text-rose-300 sm:text-lg">{nameError ?? authError ?? ''}</div>
 
                   {hasSavedSession ? (
                     <div className="mb-3 rounded-xl border border-emerald-200/75 bg-emerald-400/18 px-3 py-2 text-sm text-emerald-50 sm:text-base">
@@ -447,8 +717,11 @@ export function OnboardingOverlay({
                     {hasSavedSession ? (
                       <button
                         type="button"
-                        onClick={continueWithSavedSession}
-                        className="w-full rounded-xl border border-emerald-200/75 bg-emerald-300/35 px-4 py-2 text-base font-semibold text-emerald-50 transition duration-75 ease-out hover:bg-emerald-200/45 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-100 sm:w-auto sm:text-lg"
+                        onClick={() => {
+                          void continueWithSavedSession();
+                        }}
+                        disabled={isAuthSubmitting}
+                        className="w-full rounded-lg border border-cyan-100/85 bg-cyan-300 px-3 py-2 text-sm font-semibold uppercase tracking-wider text-slate-950 transition-colors duration-75 ease-out hover:bg-cyan-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-100 sm:w-auto sm:text-base"
                       >
                         Continue Saved Session
                       </button>
@@ -468,8 +741,8 @@ export function OnboardingOverlay({
                         void proceedFromName();
                       }}
                       disabled={!canProceedFromName}
-                      className="w-full rounded-xl bg-gradient-to-r from-sky-500 to-cyan-400 px-4 py-2 text-base font-semibold text-slate-950 transition duration-75 ease-out hover:from-sky-400 hover:to-cyan-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-200 disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:from-sky-500 disabled:hover:to-cyan-400 sm:w-auto sm:text-lg"
-                    >
+                      className="w-full rounded-xl border border-cyan-100/85 bg-cyan-300 px-4 py-2 text-base font-semibold uppercase tracking-wider text-slate-950 transition duration-75 ease-out hover:bg-cyan-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-100 disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:bg-cyan-300 sm:w-auto sm:text-lg"                    
+                      >
                       {isAuthSubmitting ? 'Please wait...' : authMode === 'LOGIN' ? 'Login' : 'Sign Up'}
                     </button>
                   </div>
@@ -598,9 +871,8 @@ export function OnboardingOverlay({
 
       {step === 'roomConfirm' ? (
         <div
-          className={`[contain:layout_paint] w-full max-w-5xl rounded-2xl border border-cyan-200/45 bg-[#09101d]/82 px-5 py-6 shadow-[0_16px_40px_rgba(2,6,23,0.66)] backdrop-blur-[1.5px] sm:px-7 ${
-            isClosingRoomStrip ? 'onboarding-room-strip-out' : 'onboarding-room-strip-in'
-          }`}
+          className={`ui-flow-box [contain:layout_paint] w-full max-w-5xl px-5 py-6 sm:px-7 ${isClosingRoomStrip ? 'onboarding-room-strip-out' : 'onboarding-room-strip-in'
+            }`}
         >
           <div className="grid gap-5 sm:grid-cols-[2fr_1fr] sm:items-end">
             <div>
@@ -736,22 +1008,11 @@ function resolveWorldId(value: string): string {
 }
 
 function validateName(value: string): { ok: true; value: string } | { ok: false; message: string } {
-  const trimmed = value.trim();
-  if (trimmed.length < 2 || trimmed.length > 20) {
-    return { ok: false, message: 'Name must be between 2 and 20 characters.' };
-  }
-  if (!NAME_PATTERN.test(trimmed)) {
-    return { ok: false, message: 'Use letters, numbers, spaces, and underscore only.' };
-  }
-  return { ok: true, value: trimmed };
+  return validateUsername(value);
 }
 
 function validateEmail(value: string): { ok: true; value: string } | { ok: false; message: string } {
-  const trimmed = value.trim().toLowerCase();
-  if (!EMAIL_PATTERN.test(trimmed)) {
-    return { ok: false, message: 'Please enter a valid email address.' };
-  }
-  return { ok: true, value: trimmed };
+  return validateEmailAddress(value);
 }
 
 function validatePassword(value: string): { ok: true; value: string } | { ok: false; message: string } {
@@ -760,6 +1021,58 @@ function validatePassword(value: string): { ok: true; value: string } | { ok: fa
     return { ok: false, message: 'Password must be at least 8 characters.' };
   }
   return { ok: true, value: trimmed };
+}
+
+function getInlineEmailError(value: string): string | null {
+  const validation = validateEmailAddress(value);
+  return validation.ok ? null : validation.message;
+}
+
+function getInlinePasswordError(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return 'Password is required.';
+  }
+
+  if (trimmed.length < 8) {
+    return 'Password must be at least 8 characters.';
+  }
+
+  return null;
+}
+
+function getInlineUsernameError(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return 'Display name is required.';
+  }
+
+  const validation = validateUsername(value);
+  if (!validation.ok) {
+    return formatDisplayNameValidationMessage(validation.message);
+  }
+
+  return null;
+}
+
+function formatDisplayNameValidationMessage(message: string): string {
+  return message.replace(/^Username\b/, 'Display name');
+}
+
+function resolveAvailabilityMessageClass(state: AvailabilityState): string {
+  if (state === 'taken' || state === 'error') {
+    return 'text-rose-300';
+  }
+
+  if (state === 'available') {
+    return 'text-emerald-200';
+  }
+
+  if (state === 'checking') {
+    return 'text-cyan-200';
+  }
+
+  return 'text-zinc-300/85';
 }
 
 function validateRoomId(value: string): { ok: true; value: string } | { ok: false; message: string } {
@@ -774,9 +1087,8 @@ function validateRoomId(value: string): { ok: true; value: string } | { ok: fals
 }
 
 function isAuthPotentiallyValid(email: string, password: string): boolean {
-  const normalizedEmail = email.trim().toLowerCase();
   const normalizedPassword = password.trim();
-  return EMAIL_PATTERN.test(normalizedEmail) && normalizedPassword.length >= 8;
+  return validateEmailAddress(email).ok && normalizedPassword.length >= 8;
 }
 
 function isRoomPotentiallyValid(value: string): boolean {
@@ -795,7 +1107,7 @@ function deriveDisplayNameFromEmail(email: string): string {
     return 'player';
   }
 
-  return sanitized.slice(0, 20);
+  return sanitized.slice(0, USERNAME_MAX_LENGTH);
 }
 
 function getSpriteSheetMetrics(): Promise<SpriteSheetMetrics> {

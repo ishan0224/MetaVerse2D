@@ -12,7 +12,7 @@ export function JoinStatusOverlay() {
 
   return (
     <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center p-4">
-      <div className="w-full max-w-md rounded-2xl border border-white/30 bg-black/75 px-5 py-4 text-center text-zinc-100 shadow-2xl backdrop-blur-md">
+      <div className="ui-flow-box w-full max-w-md px-5 py-4 text-center text-zinc-100">
         <div className="text-sm font-semibold sm:text-base">{getJoinStatusMessage(state.joinUiPhase)}</div>
       </div>
     </div>

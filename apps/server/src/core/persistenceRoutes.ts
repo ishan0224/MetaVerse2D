@@ -1,3 +1,4 @@
+import { normalizeEmail, validateEmailAddress, validateUsername } from '@metaverse2d/shared';
 import type { Express, Request, Response } from 'express';
 
 import {
@@ -22,6 +23,29 @@ type UpsertPlayerStateBody = {
 };
 
 export function attachPersistenceRoutes(app: Express): void {
+  app.get('/api/users/email-availability', async (request: Request, response: Response) => {
+    if (!persistenceService.isEnabled()) {
+      response.status(503).json({ error: 'Persistence is disabled' });
+      return;
+    }
+
+    const emailQueryParam = request.query.email;
+    const rawEmail =
+      typeof emailQueryParam === 'string'
+        ? emailQueryParam
+        : Array.isArray(emailQueryParam) && typeof emailQueryParam[0] === 'string'
+          ? emailQueryParam[0]
+          : '';
+    const emailValidation = validateEmailAddress(rawEmail);
+    if (!emailValidation.ok) {
+      response.status(400).json({ error: emailValidation.message, available: false });
+      return;
+    }
+
+    const user = await persistenceService.getUserByEmail(emailValidation.value);
+    response.status(200).json({ available: !user });
+  });
+
   app.get('/api/users', async (request: Request, response: Response) => {
     if (!persistenceService.isEnabled()) {
       response.status(503).json({ error: 'Persistence is disabled' });
@@ -54,15 +78,44 @@ export function attachPersistenceRoutes(app: Express): void {
     }
 
     const requestBody = request.body as CreateUserBody | undefined;
-    const username = requestBody?.username?.trim();
+    const requestedUsername = requestBody?.username ?? '';
+    let validatedUsername: string | undefined;
+    if (requestedUsername) {
+      const usernameValidation = validateUsername(requestedUsername);
+      if (!usernameValidation.ok) {
+        response.status(400).json({ error: usernameValidation.message });
+        return;
+      }
+      validatedUsername = usernameValidation.value;
+    }
+
+    const normalizedEmail = normalizeEmail(resolveAuthEmail(authUser));
+    const existingUserByEmail = await persistenceService.getUserByEmail(normalizedEmail);
+    if (existingUserByEmail && existingUserByEmail.authUserId !== authUser.authUserId) {
+      response.status(409).json({
+        error: 'Email is already registered.',
+        code: 'EMAIL_TAKEN',
+      });
+      return;
+    }
+
     const avatarUrl = normalizeAvatarUrl(requestBody?.avatarUrl);
     const user = await persistenceService.getOrCreateUserFromAuth({
       authUserId: authUser.authUserId,
-      email: resolveAuthEmail(authUser),
-      username,
+      email: normalizedEmail,
+      username: validatedUsername,
       avatarUrl,
     });
     if (!user) {
+      const postAttemptExistingUserByEmail = await persistenceService.getUserByEmail(normalizedEmail);
+      if (postAttemptExistingUserByEmail && postAttemptExistingUserByEmail.authUserId !== authUser.authUserId) {
+        response.status(409).json({
+          error: 'Email is already registered.',
+          code: 'EMAIL_TAKEN',
+        });
+        return;
+      }
+
       response.status(500).json({ error: 'Failed to resolve user' });
       return;
     }

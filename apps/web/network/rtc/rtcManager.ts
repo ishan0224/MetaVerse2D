@@ -1,3 +1,4 @@
+import { webEnv } from '@/config/env';
 import {
   onWebRTCAnswer,
   onWebRTCIceCandidate,
@@ -7,7 +8,6 @@ import {
   sendWebRTCOffer,
 } from '@/network';
 import type { WebRTCIceCandidate, WebRTCSessionDescription } from '@/network/socket/socketClient';
-import { webEnv } from '@/config/env';
 
 const RTC_CONFIG = {
   iceServers: webEnv.webrtcIceServers,
