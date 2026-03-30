@@ -121,6 +121,18 @@ body {
     #474747 3px 5px 2px;
 }
 
+.onboarding-shell {
+  padding-top: max(1rem, env(safe-area-inset-top));
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+}
+
+@media (min-width: 640px) {
+  .onboarding-shell {
+    padding-top: max(1.5rem, env(safe-area-inset-top));
+    padding-bottom: max(1.5rem, env(safe-area-inset-bottom));
+  }
+}
+
 .ui-flow-box {
   border-radius: var(--ui-flow-glass-radius);
   border: 1px solid var(--ui-flow-glass-border);
