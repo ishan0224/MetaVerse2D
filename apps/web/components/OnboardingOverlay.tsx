@@ -741,8 +741,8 @@ export function OnboardingOverlay({
                         void proceedFromName();
                       }}
                       disabled={!canProceedFromName}
-                      className="w-full rounded-xl border border-cyan-100/85 bg-cyan-300 px-4 py-2 text-base font-semibold uppercase tracking-wider text-slate-950 transition duration-75 ease-out hover:bg-cyan-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-100 disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:bg-cyan-300 sm:w-auto sm:text-lg"                    
-                      >
+                      className="w-full rounded-xl border border-cyan-100/85 bg-cyan-300 px-4 py-2 text-base font-semibold uppercase tracking-wider text-slate-950 transition duration-75 ease-out hover:bg-cyan-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-100 disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:bg-cyan-300 sm:w-auto sm:text-lg"
+                    >
                       {isAuthSubmitting ? 'Please wait...' : authMode === 'LOGIN' ? 'Login' : 'Sign Up'}
                     </button>
                   </div>

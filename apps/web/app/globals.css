@@ -39,8 +39,16 @@ html,
 body {
   margin: 0;
   padding: 0;
+  width: 100%;
+  height: 100%;
   min-height: 100%;
   background-color: #020617;
+  overscroll-behavior: none;
+  overflow: hidden;
+}
+
+body {
+  touch-action: manipulation;
 }
 
 @keyframes onboarding-panel-in {
@@ -126,4 +134,29 @@ body {
   .ui-flow-box {
     background: var(--ui-flow-glass-fallback-bg);
   }
+}
+
+.gameplay-safe-area {
+  padding-top: max(0px, env(safe-area-inset-top));
+  padding-right: max(0px, env(safe-area-inset-right));
+  padding-bottom: max(0px, env(safe-area-inset-bottom));
+  padding-left: max(0px, env(safe-area-inset-left));
+}
+
+.gameplay-touch-shell {
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.joystick-touch-zone {
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.joystick-touch-zone .back,
+.joystick-touch-zone .front {
+  opacity: 0.65 !important;
 }

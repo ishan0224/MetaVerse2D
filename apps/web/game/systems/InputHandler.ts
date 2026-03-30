@@ -1,5 +1,11 @@
-import type { InputState } from '@metaverse2d/shared/types/InputState';
+import {
+  type BaseInputState,
+  type InputState,
+} from '@metaverse2d/shared/types/InputState';
 import * as Phaser from 'phaser';
+
+import { resolvePlayerInputState } from '@/game/playerController';
+import { getJoystickVector, type MovementVector } from '@/store/useInputStore';
 
 export class InputHandler {
   private readonly cursors: Phaser.Types.Input.Keyboard.CursorKeys;
@@ -9,6 +15,7 @@ export class InputHandler {
     left: Phaser.Input.Keyboard.Key;
     right: Phaser.Input.Keyboard.Key;
   };
+  private smoothedJoystickVector: MovementVector = { x: 0, y: 0 };
 
   public constructor(scene: Phaser.Scene) {
     const keyboard = scene.input.keyboard;
@@ -25,12 +32,22 @@ export class InputHandler {
     }) as InputHandler['wasdKeys'];
   }
 
-  public getInputState(): InputState {
-    return {
+  public getInputState(deltaMs: number): InputState {
+    const keyboardState: BaseInputState = {
       up: this.cursors.up.isDown || this.wasdKeys.up.isDown,
       down: this.cursors.down.isDown || this.wasdKeys.down.isDown,
       left: this.cursors.left.isDown || this.wasdKeys.left.isDown,
       right: this.cursors.right.isDown || this.wasdKeys.right.isDown,
     };
+
+    const { inputState, nextJoystickVector } = resolvePlayerInputState({
+      keyboardState,
+      joystickTargetVector: getJoystickVector(),
+      previousJoystickVector: this.smoothedJoystickVector,
+      deltaMs,
+    });
+
+    this.smoothedJoystickVector = nextJoystickVector;
+    return inputState;
   }
 }
