@@ -151,7 +151,7 @@ export class MainScene extends Phaser.Scene {
 
   public update(_time: number, delta: number): void {
     const frameDeltaMs = Math.min(Math.max(delta, 0), MAX_FRAME_DELTA_TOTAL_MS);
-    const inputState = this.inputHandler.getInputState();
+    const inputState = this.inputHandler.getInputState(frameDeltaMs);
     this.multiplayerSystem.pushInput(inputState, frameDeltaMs);
     const nowMs = performance.now();
     this.syncPlayersFromServer(nowMs, inputState, frameDeltaMs);
@@ -459,7 +459,11 @@ export class MainScene extends Phaser.Scene {
   }
 
   private hasMovementIntent(inputState: InputState): boolean {
-    return inputState.up || inputState.down || inputState.left || inputState.right;
+    if (inputState.up || inputState.down || inputState.left || inputState.right) {
+      return true;
+    }
+
+    return Math.hypot(inputState.moveX ?? 0, inputState.moveY ?? 0) > 0.05;
   }
 
   private applyLocalMovementSteps(

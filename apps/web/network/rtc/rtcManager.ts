@@ -1,3 +1,4 @@
+import { webEnv } from '@/config/env';
 import {
   onWebRTCAnswer,
   onWebRTCIceCandidate,
@@ -9,7 +10,7 @@ import {
 import type { WebRTCIceCandidate, WebRTCSessionDescription } from '@/network/socket/socketClient';
 
 const RTC_CONFIG = {
-  iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+  iceServers: webEnv.webrtcIceServers,
 };
 
 class RTCManager {

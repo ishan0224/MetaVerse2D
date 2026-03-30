@@ -1,8 +1,11 @@
+import { validateUsername } from '@metaverse2d/shared';
+
 import { getDbClient } from '../db/client';
 import { getPlayerStateByUserId, upsertPlayerState } from '../db/queries/playerState';
 import {
   createUser,
   getUserByAuthUserId,
+  getUserByEmail,
   getUserByUsername,
 } from '../db/queries/users';
 
@@ -180,6 +183,40 @@ export class PlayerPersistenceService {
     }
   }
 
+  public async getUserByEmail(email: string): Promise<PersistedUser | null> {
+    const db = getDbClient();
+    if (!db) {
+      return null;
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!normalizedEmail) {
+      return null;
+    }
+
+    try {
+      const user = await getUserByEmail(db, normalizedEmail);
+      if (!user) {
+        return null;
+      }
+
+      return {
+        id: user.id,
+        authUserId: user.authUserId,
+        email: user.email,
+        username: user.username,
+        avatarUrl: user.avatarUrl,
+      };
+    } catch (error) {
+      console.error('[persistence] failed to load user by email', {
+        event: 'user_read_by_email',
+        email: normalizedEmail,
+        error,
+      });
+      return null;
+    }
+  }
+
   public async getPlayerState(userId: string, socketId: string): Promise<PersistedPlayerState | null> {
     const db = getDbClient();
     if (!db) {
@@ -241,13 +278,19 @@ export class PlayerPersistenceService {
 function normalizeUsername(username: string | undefined, email: string): string {
   const trimmed = username?.trim();
   if (trimmed) {
-    return trimmed.slice(0, 32);
+    const validation = validateUsername(trimmed);
+    if (validation.ok) {
+      return validation.value;
+    }
   }
 
-  const emailPrefix = email.split('@')[0]?.trim();
+  const emailPrefix = email.split('@')[0]?.trim().replace(/[^A-Za-z0-9_ ]+/g, ' ');
   if (emailPrefix) {
-    return emailPrefix.slice(0, 32);
+    const validation = validateUsername(emailPrefix);
+    if (validation.ok) {
+      return validation.value;
+    }
   }
 
-  return 'player';
+  return 'player_001';
 }

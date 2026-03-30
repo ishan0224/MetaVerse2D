@@ -22,7 +22,11 @@ type SpriteSheetMetrics = {
 
 let spriteSheetMetricsPromise: Promise<SpriteSheetMetrics> | null = null;
 
-export function TopRightStatusCluster() {
+type TopRightStatusClusterProps = {
+  touchOptimized?: boolean;
+};
+
+export function TopRightStatusCluster({ touchOptimized = false }: TopRightStatusClusterProps) {
   const state = useSyncExternalStore(subscribeToRuntimeUiState, getRuntimeUiState, getRuntimeUiState);
   const [avatarImageFailed, setAvatarImageFailed] = useState(false);
   const [spriteSheetMetrics, setSpriteSheetMetrics] = useState<SpriteSheetMetrics | null>(null);
@@ -61,22 +65,33 @@ export function TopRightStatusCluster() {
     };
   }, []);
 
+  const shellTextClass = touchOptimized ? 'text-xs font-semibold text-zinc-100' : 'text-[11px] font-semibold text-zinc-100 sm:text-xs';
+  const safeAreaStyle = touchOptimized
+    ? {
+        paddingRight: 'max(0px, env(safe-area-inset-right))',
+        paddingTop: 'max(0px, env(safe-area-inset-top))',
+      }
+    : undefined;
+
   return (
-    <div className="pointer-events-none absolute right-3 top-3 z-20 flex items-center gap-2 sm:right-4 sm:top-4">
-      <CircleShell>
-        <span className="text-[11px] font-semibold text-zinc-100 sm:text-xs">{roomLabel}</span>
+    <div
+      className={`pointer-events-none absolute z-20 flex items-center gap-2 ${touchOptimized ? 'right-2 top-2' : 'right-3 top-3 sm:right-4 sm:top-4'}`}
+      style={safeAreaStyle}
+    >
+      <CircleShell touchOptimized={touchOptimized}>
+        <span className={shellTextClass}>{roomLabel}</span>
       </CircleShell>
 
-      <CircleShell>
+      <CircleShell touchOptimized={touchOptimized}>
         <div className="flex items-center gap-1">
           <span
             className={`inline-block h-2 w-2 rounded-full ${getConnectionDotClass(state.socketStatus)}`}
           />
-          <span className="text-[11px] font-semibold text-zinc-100 sm:text-xs">{populationLabel}</span>
+          <span className={shellTextClass}>{populationLabel}</span>
         </div>
       </CircleShell>
 
-      <CircleShell>
+      <CircleShell touchOptimized={touchOptimized}>
         {state.avatarUrl && !avatarImageFailed ? (
           <img
             src={state.avatarUrl}
@@ -104,9 +119,17 @@ export function TopRightStatusCluster() {
   );
 }
 
-function CircleShell({ children }: { children: ReactNode }) {
+function CircleShell({
+  children,
+  touchOptimized = false,
+}: {
+  children: ReactNode;
+  touchOptimized?: boolean;
+}) {
   return (
-    <div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-full border border-white/15 bg-black/40 shadow-sm backdrop-blur sm:h-12 sm:w-12">
+    <div
+      className={`flex items-center justify-center overflow-hidden rounded-full border border-white/15 bg-black/40 shadow-sm backdrop-blur ${touchOptimized ? 'h-14 w-14' : 'h-11 w-11 sm:h-12 sm:w-12'}`}
+    >
       {children}
     </div>
   );

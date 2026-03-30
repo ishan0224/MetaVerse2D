@@ -126,9 +126,9 @@ export function CircularMinimap() {
             {rasterizedMapError}
           </div>
         ) : null}
-        <div className="absolute bottom-2 left-1/2 -translate-x-1/2 text-[10px] font-medium uppercase tracking-wide text-zinc-200">
+        {/* <div className="absolute bottom-2 left-1/2 -translate-x-1/2 text-[10px] font-medium uppercase tracking-wide text-zinc-200">
           Test MiniMap
-        </div>
+        </div> */}
       </div>
     </div>
   );

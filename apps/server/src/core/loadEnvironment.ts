@@ -3,6 +3,14 @@ import { resolve } from 'node:path';
 
 let hasLoadedEnvironment = false;
 
+export type ServerRuntimeEnv = {
+  nodeEnv: string;
+  isProduction: boolean;
+  serverPort: number;
+  allowedSocketOrigins: Set<string>;
+  allowDevTunnelOrigins: boolean;
+};
+
 function parseEnvLine(line: string): [string, string] | null {
   const trimmed = line.trim();
 
@@ -66,4 +74,75 @@ export function loadServerEnvironment(): void {
   }
 
   hasLoadedEnvironment = true;
+}
+
+function parseOriginsCsv(value: string | undefined): string[] {
+  return (value ?? '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+}
+
+function normalizeOrigin(origin: string): string {
+  try {
+    const parsed = new URL(origin);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new Error('invalid protocol');
+    }
+    return parsed.origin;
+  } catch {
+    throw new Error(`[server env] Invalid CLIENT_ORIGIN entry: "${origin}"`);
+  }
+}
+
+function parseBoolean(value: string | undefined): boolean {
+  const normalized = (value ?? '').trim().toLowerCase();
+  return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
+}
+
+export function resolveServerRuntimeEnv(): ServerRuntimeEnv {
+  const nodeEnv = process.env.NODE_ENV?.trim() || 'development';
+  const isProduction = nodeEnv === 'production';
+
+  const rawServerPort = process.env.SERVER_PORT?.trim() || '4000';
+  const serverPort = Number(rawServerPort);
+  if (!Number.isInteger(serverPort) || serverPort <= 0 || serverPort > 65535) {
+    throw new Error(`[server env] SERVER_PORT must be a valid TCP port. Received "${rawServerPort}".`);
+  }
+
+  const primaryOrigins = parseOriginsCsv(process.env.CLIENT_ORIGIN);
+  const previewOrigins = parseOriginsCsv(process.env.CLIENT_ORIGIN_PREVIEW);
+  const allowedSocketOrigins = new Set(
+    [...primaryOrigins, ...previewOrigins].map((origin) => normalizeOrigin(origin)),
+  );
+
+  if (!isProduction) {
+    allowedSocketOrigins.add('http://localhost:3000');
+    allowedSocketOrigins.add('https://localhost:3000');
+  }
+
+  if (isProduction && allowedSocketOrigins.size === 0) {
+    throw new Error(
+      '[server env] CLIENT_ORIGIN must include at least one origin in production.',
+    );
+  }
+
+  const supabaseUrl = process.env.SERVER_SUPABASE_URL?.trim() ?? '';
+  const supabaseAnonKey = process.env.SERVER_SUPABASE_ANON_KEY?.trim() ?? '';
+  if (!supabaseUrl || !supabaseAnonKey) {
+    throw new Error(
+      '[server env] SERVER_SUPABASE_URL and SERVER_SUPABASE_ANON_KEY are required for authenticated sockets.',
+    );
+  }
+
+  const allowDevTunnelOrigins =
+    !isProduction && parseBoolean(process.env.ALLOW_DEV_TUNNEL_ORIGINS);
+
+  return {
+    nodeEnv,
+    isProduction,
+    serverPort,
+    allowedSocketOrigins,
+    allowDevTunnelOrigins,
+  };
 }

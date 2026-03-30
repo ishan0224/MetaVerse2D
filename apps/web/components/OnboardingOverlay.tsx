@@ -1,8 +1,15 @@
 'use client';
 
 import {
+  normalizeEmail,
+  USERNAME_MAX_LENGTH,
+  validateEmailAddress,
+  validateUsername,
+} from '@metaverse2d/shared';
+import {
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -19,6 +26,7 @@ import {
   normalizeAvatarId,
 } from '@/game/config/characterSpriteConfig';
 import {
+  getAuthAccessToken,
   getAuthSessionState,
   initializeAuthSession,
   signInWithEmailPassword,
@@ -26,6 +34,8 @@ import {
   signUpWithEmailPassword,
   subscribeToAuthSession,
 } from '@/network/auth/authSession';
+import { checkEmailAvailability } from '@/network/auth/emailAvailabilityClient';
+import { upsertUserProfile } from '@/network/auth/userProfileClient';
 
 export type OnboardingStep = 'name' | 'avatar' | 'world' | 'roomConfirm';
 
@@ -56,12 +66,13 @@ type WorldOption = {
 
 type AuthMode = 'LOGIN' | 'SIGN_UP';
 
-const NAME_PATTERN = /^[A-Za-z0-9_ ]+$/;
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const ROOM_PATTERN = /^[A-Za-z0-9_-]+$/;
 const STRIP_EXIT_DURATION_MS = 220;
 const AVATAR_PREVIEW_SCALE = 7;
 const AVATAR_ANIMATION_MS = 110;
+const EMAIL_DEBOUNCE_MS = 400;
+
+type AvailabilityState = 'idle' | 'checking' | 'available' | 'taken' | 'error';
 
 const WORLD_OPTIONS: readonly WorldOption[] = [
   {
@@ -84,6 +95,12 @@ export function OnboardingOverlay({
   const [authMode, setAuthMode] = useState<AuthMode>('LOGIN');
   const [emailValue, setEmailValue] = useState('');
   const [passwordValue, setPasswordValue] = useState('');
+  const [emailTouched, setEmailTouched] = useState(false);
+  const [passwordTouched, setPasswordTouched] = useState(false);
+  const [usernameTouched, setUsernameTouched] = useState(false);
+  const [emailAvailabilityState, setEmailAvailabilityState] =
+    useState<AvailabilityState>('idle');
+  const [emailAvailabilityMessage, setEmailAvailabilityMessage] = useState<string | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
   const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
   const [avatarId, setAvatarId] = useState<AvatarId>(normalizeAvatarId(initialDraft.avatarId));
@@ -100,6 +117,10 @@ export function OnboardingOverlay({
 
   const roomInputRef = useRef<HTMLInputElement | null>(null);
   const closeTimerRef = useRef<number | null>(null);
+  const emailCacheRef = useRef<Map<string, boolean>>(new Map());
+  const emailRequestIdRef = useRef(0);
+  const emailDebounceTimerRef = useRef<number | null>(null);
+  const emailAbortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     void initializeAuthSession().catch((error) => {
@@ -130,6 +151,10 @@ export function OnboardingOverlay({
       if (closeTimerRef.current) {
         window.clearTimeout(closeTimerRef.current);
       }
+      if (emailDebounceTimerRef.current) {
+        window.clearTimeout(emailDebounceTimerRef.current);
+      }
+      emailAbortControllerRef.current?.abort();
     };
   }, []);
 
@@ -143,11 +168,127 @@ export function OnboardingOverlay({
     onVisualStateChange?.({ step, worldId });
   }, [onVisualStateChange, step, worldId]);
 
-  const canProceedFromName = isAuthPotentiallyValid(emailValue, passwordValue) && !isAuthSubmitting;
+  const usernameValidation = validateName(nameValue);
+  const emailInlineError = emailTouched ? getInlineEmailError(emailValue) : null;
+  const passwordInlineError = passwordTouched ? getInlinePasswordError(passwordValue) : null;
+  const usernameInlineError =
+    authMode === 'SIGN_UP' && usernameTouched
+      ? getInlineUsernameError(nameValue)
+      : null;
+  const shouldShowEmailAvailability =
+    authMode === 'SIGN_UP' && emailTouched && !emailInlineError;
+  const canProceedFromName =
+    isAuthPotentiallyValid(emailValue, passwordValue) &&
+    (authMode !== 'SIGN_UP' || usernameValidation.ok) &&
+    (authMode !== 'SIGN_UP' ||
+      (emailAvailabilityState !== 'checking' &&
+        emailAvailabilityState !== 'taken')) &&
+    !isAuthSubmitting;
   const canConfirmRoom = isRoomPotentiallyValid(roomId);
   const hasSavedSession = Boolean(authSession.accessToken && authSession.user?.email);
 
   const currentStepNumber = step === 'name' ? 1 : step === 'avatar' ? 2 : step === 'world' ? 3 : 4;
+
+  const clearPendingEmailCheck = useCallback(() => {
+    if (emailDebounceTimerRef.current) {
+      window.clearTimeout(emailDebounceTimerRef.current);
+      emailDebounceTimerRef.current = null;
+    }
+    emailAbortControllerRef.current?.abort();
+    emailAbortControllerRef.current = null;
+  }, []);
+
+  const runEmailAvailabilityCheck = useCallback(
+    async (
+      email: string,
+      signal?: AbortSignal,
+    ): Promise<{ ok: boolean; available: boolean; message?: string }> => {
+      const normalizedEmail = normalizeEmail(email);
+      const cachedAvailability = emailCacheRef.current.get(normalizedEmail);
+      if (typeof cachedAvailability === 'boolean') {
+        return { ok: true, available: cachedAvailability };
+      }
+
+      const result = await checkEmailAvailability(normalizedEmail, signal);
+      if (!result.ok) {
+        return { ok: false, available: false, message: result.message };
+      }
+
+      emailCacheRef.current.set(normalizedEmail, result.available);
+      return { ok: true, available: result.available };
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (authMode !== 'SIGN_UP') {
+      clearPendingEmailCheck();
+      setEmailAvailabilityState('idle');
+      setEmailAvailabilityMessage(null);
+      return;
+    }
+
+    const emailValidation = validateEmail(emailValue);
+    if (!emailValidation.ok) {
+      clearPendingEmailCheck();
+      setEmailAvailabilityState('idle');
+      setEmailAvailabilityMessage(null);
+      return;
+    }
+
+    const normalizedEmail = emailValidation.value;
+    const cachedAvailability = emailCacheRef.current.get(normalizedEmail);
+    if (typeof cachedAvailability === 'boolean') {
+      setEmailAvailabilityState(cachedAvailability ? 'available' : 'taken');
+      setEmailAvailabilityMessage(cachedAvailability ? 'Email available.' : 'Email is already registered.');
+      return;
+    }
+
+    const requestId = emailRequestIdRef.current + 1;
+    emailRequestIdRef.current = requestId;
+    clearPendingEmailCheck();
+    setEmailAvailabilityState('checking');
+    setEmailAvailabilityMessage('Checking email...');
+
+    emailDebounceTimerRef.current = window.setTimeout(() => {
+      const activeRequestId = requestId;
+      const abortController = new AbortController();
+      emailAbortControllerRef.current = abortController;
+
+      void runEmailAvailabilityCheck(normalizedEmail, abortController.signal)
+        .then((result) => {
+          if (emailRequestIdRef.current !== activeRequestId) {
+            return;
+          }
+
+          if (!result.ok) {
+            setEmailAvailabilityState('error');
+            setEmailAvailabilityMessage(result.message ?? 'Unable to verify email right now.');
+            return;
+          }
+
+          if (result.available) {
+            setEmailAvailabilityState('available');
+            setEmailAvailabilityMessage('Email available.');
+            return;
+          }
+
+          setEmailAvailabilityState('taken');
+          setEmailAvailabilityMessage('Email is already registered.');
+        })
+        .catch(() => {
+          if (emailRequestIdRef.current !== activeRequestId) {
+            return;
+          }
+          setEmailAvailabilityState('error');
+          setEmailAvailabilityMessage('Unable to verify email right now.');
+        });
+    }, EMAIL_DEBOUNCE_MS);
+
+    return () => {
+      clearPendingEmailCheck();
+    };
+  }, [authMode, clearPendingEmailCheck, emailValue, runEmailAvailabilityCheck]);
 
   const handleBack = () => {
     if (isClosingRoomStrip) {
@@ -183,6 +324,12 @@ export function OnboardingOverlay({
       return;
     }
 
+    setEmailTouched(true);
+    setPasswordTouched(true);
+    if (authMode === 'SIGN_UP') {
+      setUsernameTouched(true);
+    }
+
     const emailValidation = validateEmail(emailValue);
     if (!emailValidation.ok) {
       setAuthError(emailValidation.message);
@@ -196,24 +343,88 @@ export function OnboardingOverlay({
     }
 
     let resolvedName = deriveDisplayNameFromEmail(emailValidation.value);
-    if (nameValue.trim()) {
-      const nameValidation = validateName(nameValue);
-      if (!nameValidation.ok) {
-        setNameError(nameValidation.message);
+    if (authMode === 'SIGN_UP') {
+      if (emailAvailabilityState === 'checking') {
+        setAuthError('Checking email availability...');
         return;
       }
 
-      resolvedName = nameValidation.value;
+      if (emailAvailabilityState === 'taken') {
+        setAuthError('Email is already registered.');
+        return;
+      }
+
+      const emailAvailability = await runEmailAvailabilityCheck(emailValidation.value);
+      if (!emailAvailability.ok) {
+        const message = emailAvailability.message ?? 'Unable to verify email right now.';
+        setAuthError(message);
+        setEmailAvailabilityState('error');
+        setEmailAvailabilityMessage(message);
+        return;
+      }
+
+      if (!emailAvailability.available) {
+        setAuthError('Email is already registered.');
+        setEmailAvailabilityState('taken');
+        setEmailAvailabilityMessage('Email is already registered.');
+        emailCacheRef.current.set(emailValidation.value, false);
+        return;
+      }
+
+      const signUpNameValidation = validateName(nameValue);
+      if (!signUpNameValidation.ok) {
+        setNameError(formatDisplayNameValidationMessage(signUpNameValidation.message));
+        return;
+      }
+      resolvedName = signUpNameValidation.value;
+    } else if (nameValue.trim()) {
+      const loginNameValidation = validateName(nameValue);
+      if (!loginNameValidation.ok) {
+        setNameError(formatDisplayNameValidationMessage(loginNameValidation.message));
+        return;
+      }
+
+      resolvedName = loginNameValidation.value;
     }
 
     setAuthError(null);
     setNameError(null);
     setIsAuthSubmitting(true);
 
-    const authResult =
-      authMode === 'LOGIN'
+    const hasMatchingSession =
+      authMode === 'SIGN_UP' &&
+      Boolean(authSession.accessToken) &&
+      authSession.user?.email?.trim().toLowerCase() === emailValidation.value;
+
+    const authResult = hasMatchingSession
+      ? { ok: true, user: authSession.user ?? null }
+      : authMode === 'LOGIN'
         ? await signInWithEmailPassword(emailValidation.value, passwordValidation.value)
         : await signUpWithEmailPassword(emailValidation.value, passwordValidation.value);
+
+    if (authResult.ok && authMode === 'SIGN_UP') {
+      const accessToken = getAuthAccessToken();
+      if (!accessToken) {
+        setIsAuthSubmitting(false);
+        setAuthError('Authentication succeeded, but no active session is available yet.');
+        return;
+      }
+
+      const profileResult = await upsertUserProfile(accessToken, resolvedName);
+      if (!profileResult.ok) {
+        setIsAuthSubmitting(false);
+        if (profileResult.code === 'EMAIL_TAKEN' || profileResult.status === 409) {
+          setAuthError('Email is already registered.');
+          setEmailAvailabilityState('taken');
+          setEmailAvailabilityMessage('Email is already registered.');
+          emailCacheRef.current.set(emailValidation.value, false);
+          return;
+        }
+
+        setAuthError(profileResult.message);
+        return;
+      }
+    }
 
     setIsAuthSubmitting(false);
 
@@ -226,20 +437,44 @@ export function OnboardingOverlay({
     setStep('avatar');
   };
 
-  const continueWithSavedSession = () => {
+  const continueWithSavedSession = async () => {
     const sessionEmail = authSession.user?.email?.trim().toLowerCase();
     if (!authSession.accessToken || !sessionEmail) {
       return;
     }
 
     let resolvedName = deriveDisplayNameFromEmail(sessionEmail);
-    if (nameValue.trim()) {
-      const nameValidation = validateName(nameValue);
-      if (!nameValidation.ok) {
-        setNameError(nameValidation.message);
+    if (authMode === 'SIGN_UP') {
+      setUsernameTouched(true);
+      const signUpNameValidation = validateName(nameValue);
+      if (!signUpNameValidation.ok) {
+        setNameError(formatDisplayNameValidationMessage(signUpNameValidation.message));
         return;
       }
-      resolvedName = nameValidation.value;
+      resolvedName = signUpNameValidation.value;
+
+      setIsAuthSubmitting(true);
+      const profileResult = await upsertUserProfile(authSession.accessToken, resolvedName);
+      setIsAuthSubmitting(false);
+      if (!profileResult.ok) {
+        if (profileResult.code === 'EMAIL_TAKEN' || profileResult.status === 409) {
+          setAuthError('Email is already registered.');
+          setEmailAvailabilityState('taken');
+          setEmailAvailabilityMessage('Email is already registered.');
+          emailCacheRef.current.set(sessionEmail, false);
+          return;
+        }
+
+        setAuthError(profileResult.message);
+        return;
+      }
+    } else if (nameValue.trim()) {
+      const loginNameValidation = validateName(nameValue);
+      if (!loginNameValidation.ok) {
+        setNameError(formatDisplayNameValidationMessage(loginNameValidation.message));
+        return;
+      }
+      resolvedName = loginNameValidation.value;
     }
 
     setAuthError(null);
@@ -258,6 +493,15 @@ export function OnboardingOverlay({
         console.error('failed to sign out', error);
         setAuthError('Unable to sign out right now. Please retry.');
       });
+  };
+
+  const handleAuthModeChange = (nextMode: AuthMode) => {
+    setAuthMode(nextMode);
+    setAuthError(null);
+    setNameError(null);
+    setEmailAvailabilityState('idle');
+    setEmailAvailabilityMessage(null);
+    clearPendingEmailCheck();
   };
 
   const proceedFromAvatar = () => {
@@ -311,7 +555,7 @@ export function OnboardingOverlay({
 
   return (
     <div
-      className="onboarding-readable-text absolute inset-0 z-40 flex items-start justify-center overflow-y-auto bg-[radial-gradient(circle_at_20%_20%,rgba(56,189,248,0.16),transparent_44%),radial-gradient(circle_at_80%_80%,rgba(251,146,60,0.16),transparent_42%),rgba(3,7,18,0.34)] px-3 py-4 sm:items-center sm:p-6"
+      className="onboarding-readable-text absolute inset-0 z-40 flex items-start justify-center overflow-y-auto bg-[radial-gradient(circle_at_20%_20%,rgba(56,189,248,0.2),transparent_44%),radial-gradient(circle_at_80%_80%,rgba(251,146,60,0.2),transparent_42%),rgba(3,7,18,0.72)] px-3 py-4 sm:items-center sm:p-6"
       onKeyDown={handleRootKeyDown}
       style={{ fontFamily: '"Small Pixel-7", "Neon Pixel-7", "Pixelify Sans", "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif' }}
     >
@@ -325,44 +569,42 @@ export function OnboardingOverlay({
             </span>
           </div>
 
-          <div className="onboarding-panel-in [contain:layout_paint] overflow-hidden rounded-2xl border border-sky-200/25 bg-[#0c1320]/88 shadow-[0_12px_34px_rgba(2,6,23,0.62)]">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 px-5 py-3 sm:px-7">
-              <span className="text-sm uppercase tracking-[0.18em] text-sky-100/80 sm:text-base">Onboarding</span>
-              <span className="text-sm font-semibold text-sky-50/80 sm:text-base">Step {currentStepNumber} / 4</span>
+          <div className="ui-flow-box onboarding-panel-in [contain:layout_paint] overflow-hidden">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/15 px-5 py-3 sm:px-7">
+              <span className="text-sm uppercase tracking-[0.18em] text-sky-100/90 sm:text-base">Onboarding</span>
+              <span className="text-sm font-semibold text-sky-50/90 sm:text-base">Step {currentStepNumber} / 4</span>
             </div>
 
             {step === 'name' ? (
               <div className="grid grid-cols-1 md:grid-cols-2">
-                <section className="border-b border-white/10 p-5 md:border-b-0 md:border-r md:border-white/10 md:p-8">
+                <section className="border-b border-white/15 p-5 md:border-b-0 md:border-r md:border-white/15 md:p-8">
                   <h2 className="text-4xl font-bold text-white sm:text-5xl">Account Access</h2>
-                  <p className="mt-2 text-lg text-zinc-300 sm:text-xl">Sign in or create an account to continue.</p>
+                  <p className="mt-2 text-lg text-zinc-200 sm:text-xl">Sign in or create an account to continue.</p>
 
-                  <div className="mt-5 grid grid-cols-2 gap-2 rounded-xl bg-black/30 p-1">
+                  <div className="mt-5 grid grid-cols-2 gap-2 rounded-xl bg-black/42 p-1">
                     <button
                       type="button"
-                      onClick={() => setAuthMode('LOGIN')}
-                      className={`rounded-lg px-3 py-2 text-sm font-semibold uppercase tracking-wider transition-colors duration-75 ease-out sm:text-base ${
-                        authMode === 'LOGIN'
-                          ? 'bg-cyan-300 text-slate-950'
-                          : 'text-zinc-300 hover:bg-white/10'
-                      }`}
+                      onClick={() => handleAuthModeChange('LOGIN')}
+                      className={`rounded-lg border px-3 py-2 text-sm font-semibold uppercase tracking-wider transition-colors duration-75 ease-out sm:text-base ${authMode === 'LOGIN'
+                        ? 'border-cyan-100/85 bg-cyan-300 text-slate-950'
+                        : 'border-white/40 text-zinc-100 hover:border-white/65 hover:bg-white/20'
+                        }`}
                     >
                       Login
                     </button>
                     <button
                       type="button"
-                      onClick={() => setAuthMode('SIGN_UP')}
-                      className={`rounded-lg px-3 py-2 text-sm font-semibold uppercase tracking-wider transition-colors duration-75 ease-out sm:text-base ${
-                        authMode === 'SIGN_UP'
-                          ? 'bg-cyan-300 text-slate-950'
-                          : 'text-zinc-300 hover:bg-white/10'
-                      }`}
+                      onClick={() => handleAuthModeChange('SIGN_UP')}
+                      className={`rounded-lg border px-3 py-2 text-sm font-semibold uppercase tracking-wider transition-colors duration-75 ease-out sm:text-base ${authMode === 'SIGN_UP'
+                        ? 'border-cyan-100/85 bg-cyan-300 text-slate-950'
+                        : 'border-white/40 text-zinc-100 hover:border-white/65 hover:bg-white/20'
+                        }`}
                     >
                       Sign Up
                     </button>
                   </div>
 
-                  <label htmlFor="onboarding-email" className="mt-4 block text-base uppercase tracking-widest text-zinc-400 sm:text-lg">
+                  <label htmlFor="onboarding-email" className="mt-4 block text-base uppercase tracking-widest text-zinc-200 sm:text-lg">
                     Email
                   </label>
                   <input
@@ -370,6 +612,7 @@ export function OnboardingOverlay({
                     value={emailValue}
                     onChange={(event) => {
                       setEmailValue(event.target.value);
+                      setEmailTouched(true);
                       if (authError) {
                         setAuthError(null);
                       }
@@ -382,12 +625,21 @@ export function OnboardingOverlay({
                     }}
                     autoFocus
                     maxLength={120}
-                    className="mt-2 w-full rounded-xl border border-sky-100/20 bg-black/40 px-4 py-3 text-xl text-zinc-100 outline-none transition-colors duration-75 ease-out focus:border-sky-300/60 focus:ring-2 focus:ring-sky-300/40 sm:text-2xl"
+                    className="mt-2 w-full rounded-xl border border-sky-100/45 bg-black/52 px-4 py-3 text-xl text-zinc-50 outline-none transition-colors duration-75 ease-out focus:border-sky-300/85 focus:ring-2 focus:ring-sky-300/50 sm:text-2xl"
                     placeholder="you@example.com"
                     autoComplete="email"
                   />
+                  <div className="min-h-6 pt-1 text-sm sm:text-base">
+                    {emailInlineError ? (
+                      <span className="text-rose-300">{emailInlineError}</span>
+                    ) : shouldShowEmailAvailability ? (
+                      <span className={resolveAvailabilityMessageClass(emailAvailabilityState)}>
+                        {emailAvailabilityMessage ?? ''}
+                      </span>
+                    ) : null}
+                  </div>
 
-                  <label htmlFor="onboarding-password" className="mt-4 block text-base uppercase tracking-widest text-zinc-400 sm:text-lg">
+                  <label htmlFor="onboarding-password" className="mt-4 block text-base uppercase tracking-widest text-zinc-200 sm:text-lg">
                     Password
                   </label>
                   <input
@@ -396,6 +648,7 @@ export function OnboardingOverlay({
                     value={passwordValue}
                     onChange={(event) => {
                       setPasswordValue(event.target.value);
+                      setPasswordTouched(true);
                       if (authError) {
                         setAuthError(null);
                       }
@@ -407,19 +660,25 @@ export function OnboardingOverlay({
                       }
                     }}
                     maxLength={128}
-                    className="mt-2 w-full rounded-xl border border-sky-100/20 bg-black/40 px-4 py-3 text-xl text-zinc-100 outline-none transition-colors duration-75 ease-out focus:border-sky-300/60 focus:ring-2 focus:ring-sky-300/40 sm:text-2xl"
+                    className="mt-2 w-full rounded-xl border border-sky-100/45 bg-black/52 px-4 py-3 text-xl text-zinc-50 outline-none transition-colors duration-75 ease-out focus:border-sky-300/85 focus:ring-2 focus:ring-sky-300/50 sm:text-2xl"
                     placeholder={authMode === 'SIGN_UP' ? 'Create password (8+ chars)' : 'Enter password'}
                     autoComplete={authMode === 'SIGN_UP' ? 'new-password' : 'current-password'}
                   />
+                  <div className="min-h-6 pt-1 text-sm text-rose-300 sm:text-base">
+                    {passwordInlineError ?? ''}
+                  </div>
 
-                  <label htmlFor="onboarding-name" className="mt-4 block text-base uppercase tracking-widest text-zinc-400 sm:text-lg">
-                    Display Name (Optional)
+                  <label htmlFor="onboarding-name" className="mt-4 block text-base uppercase tracking-widest text-zinc-200 sm:text-lg">
+                    {authMode === 'SIGN_UP' ? 'Display Name' : 'Display Name (Optional)'}
                   </label>
                   <input
                     id="onboarding-name"
                     value={nameValue}
                     onChange={(event) => {
                       setNameValue(event.target.value);
+                      if (authMode === 'SIGN_UP') {
+                        setUsernameTouched(true);
+                      }
                       if (nameError) {
                         setNameError(null);
                       }
@@ -430,16 +689,25 @@ export function OnboardingOverlay({
                         void proceedFromName();
                       }
                     }}
-                    maxLength={20}
-                    className="mt-2 w-full rounded-xl border border-sky-100/20 bg-black/40 px-4 py-3 text-xl text-zinc-100 outline-none transition-colors duration-75 ease-out focus:border-sky-300/60 focus:ring-2 focus:ring-sky-300/40 sm:text-2xl"
-                    placeholder="Defaults to email prefix"
+                    maxLength={USERNAME_MAX_LENGTH}
+                    className="mt-2 w-full rounded-xl border border-sky-100/45 bg-black/52 px-4 py-3 text-xl text-zinc-50 outline-none transition-colors duration-75 ease-out focus:border-sky-300/85 focus:ring-2 focus:ring-sky-300/50 sm:text-2xl"
+                    placeholder={authMode === 'SIGN_UP' ? 'Choose display name' : 'Defaults to email prefix'}
                     autoComplete="nickname"
                   />
+                  <div className="min-h-6 pt-1 text-sm sm:text-base">
+                    {authMode === 'SIGN_UP' ? (
+                      <span className={usernameInlineError ? 'text-rose-300' : 'text-zinc-300/85'}>
+                        {usernameInlineError ?? ''}
+                      </span>
+                    ) : (
+                      <span className="text-zinc-300/85">Optional.</span>
+                    )}
+                  </div>
 
-                  <div className="min-h-6 pt-2 text-base text-rose-300 sm:text-lg">{authError ?? nameError ?? ''}</div>
+                  <div className="min-h-6 pt-2 text-base text-rose-300 sm:text-lg">{nameError ?? authError ?? ''}</div>
 
                   {hasSavedSession ? (
-                    <div className="mb-3 rounded-xl border border-emerald-300/30 bg-emerald-400/10 px-3 py-2 text-sm text-emerald-100 sm:text-base">
+                    <div className="mb-3 rounded-xl border border-emerald-200/75 bg-emerald-400/18 px-3 py-2 text-sm text-emerald-50 sm:text-base">
                       <span>Signed in as </span>
                       <span className="font-semibold">{authSession.user?.email}</span>
                     </div>
@@ -449,8 +717,11 @@ export function OnboardingOverlay({
                     {hasSavedSession ? (
                       <button
                         type="button"
-                        onClick={continueWithSavedSession}
-                        className="w-full rounded-xl border border-emerald-200/60 bg-emerald-300/20 px-4 py-2 text-base font-semibold text-emerald-100 transition duration-75 ease-out hover:bg-emerald-200/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-100 sm:w-auto sm:text-lg"
+                        onClick={() => {
+                          void continueWithSavedSession();
+                        }}
+                        disabled={isAuthSubmitting}
+                        className="w-full rounded-lg border border-cyan-100/85 bg-cyan-300 px-3 py-2 text-sm font-semibold uppercase tracking-wider text-slate-950 transition-colors duration-75 ease-out hover:bg-cyan-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-100 sm:w-auto sm:text-base"
                       >
                         Continue Saved Session
                       </button>
@@ -459,7 +730,7 @@ export function OnboardingOverlay({
                       <button
                         type="button"
                         onClick={handleSignOut}
-                        className="w-full rounded-xl border border-white/25 px-4 py-2 text-base font-semibold text-zinc-100 transition duration-75 ease-out hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/70 sm:w-auto sm:text-lg"
+                        className="w-full rounded-xl border border-white/45 bg-white/12 px-4 py-2 text-base font-semibold text-zinc-50 transition duration-75 ease-out hover:bg-white/24 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/80 sm:w-auto sm:text-lg"
                       >
                         Sign Out
                       </button>
@@ -470,7 +741,7 @@ export function OnboardingOverlay({
                         void proceedFromName();
                       }}
                       disabled={!canProceedFromName}
-                      className="w-full rounded-xl bg-gradient-to-r from-sky-500 to-cyan-400 px-4 py-2 text-base font-semibold text-slate-950 transition duration-75 ease-out hover:from-sky-400 hover:to-cyan-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-200 disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:from-sky-500 disabled:hover:to-cyan-400 sm:w-auto sm:text-lg"
+                      className="w-full rounded-xl border border-cyan-100/85 bg-cyan-300 px-4 py-2 text-base font-semibold uppercase tracking-wider text-slate-950 transition duration-75 ease-out hover:bg-cyan-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-100 disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:bg-cyan-300 sm:w-auto sm:text-lg"
                     >
                       {isAuthSubmitting ? 'Please wait...' : authMode === 'LOGIN' ? 'Login' : 'Sign Up'}
                     </button>
@@ -480,7 +751,7 @@ export function OnboardingOverlay({
                 <section className="flex items-center justify-center p-6 md:p-8">
                   <div className="max-w-sm text-center">
                     <p className="text-4xl font-semibold leading-tight text-sky-100 sm:text-5xl lg:text-6xl">Welcome to your 2D world</p>
-                    <p className="mt-3 text-2xl text-zinc-300 sm:text-3xl">
+                    <p className="mt-3 text-2xl text-zinc-200 sm:text-3xl">
                       Build your identity, choose an avatar, and jump into your room.
                     </p>
                   </div>
@@ -490,7 +761,7 @@ export function OnboardingOverlay({
 
             {step === 'avatar' ? (
               <div className="grid grid-cols-1 md:grid-cols-2">
-                <section className="border-b border-white/10 p-5 md:border-b-0 md:border-r md:border-white/10 md:p-8">
+                <section className="border-b border-white/15 p-5 md:border-b-0 md:border-r md:border-white/15 md:p-8">
                   <h2 className="text-4xl font-bold text-white sm:text-5xl">Please select your avatar</h2>
                   <div className="mt-5 grid gap-2">
                     {AVATAR_IDS.map((candidate) => {
@@ -500,11 +771,10 @@ export function OnboardingOverlay({
                           key={candidate}
                           type="button"
                           onClick={() => setAvatarId(candidate)}
-                          className={`rounded-xl border px-4 py-3 text-left text-lg font-semibold transition-colors duration-75 ease-out sm:text-xl ${
-                            selected
-                              ? 'border-cyan-200/80 bg-cyan-400/20 text-cyan-50 shadow-[0_0_0_1px_rgba(125,211,252,0.4)]'
-                              : 'border-white/10 bg-black/30 text-zinc-200 hover:border-cyan-200/40 hover:bg-cyan-500/10'
-                          }`}
+                          className={`rounded-xl border px-4 py-3 text-left text-lg font-semibold transition-colors duration-75 ease-out sm:text-xl ${selected
+                            ? 'border-cyan-200/80 bg-cyan-400/20 text-cyan-50 shadow-[0_0_0_1px_rgba(125,211,252,0.4)]'
+                            : 'border-white/30 bg-black/42 text-zinc-100 hover:border-cyan-200/60 hover:bg-cyan-500/20'
+                            }`}
                         >
                           Avatar {candidate}
                         </button>
@@ -515,7 +785,7 @@ export function OnboardingOverlay({
                     <button
                       type="button"
                       onClick={handleBack}
-                      className="rounded-xl border border-white/20 px-4 py-2 text-base font-semibold text-zinc-100 transition-colors duration-75 ease-out hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60 sm:text-lg"
+                      className="rounded-xl border border-white/45 bg-white/12 px-4 py-2 text-base font-semibold text-zinc-50 transition-colors duration-75 ease-out hover:bg-white/24 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/75 sm:text-lg"
                     >
                       Back
                     </button>
@@ -530,9 +800,9 @@ export function OnboardingOverlay({
                 </section>
 
                 <section className="flex items-center justify-center p-6 md:p-8">
-                  <div className="w-full max-w-xs rounded-2xl border border-cyan-200/20 bg-transparent p-5 shadow-[0_10px_26px_rgba(14,116,144,0.16)]">
-                    <p className="text-center text-sm uppercase tracking-[0.2em] text-cyan-100/70 sm:text-base">Animated Preview</p>
-                    <div className="mt-4 flex items-center justify-center rounded-xl border border-white/10 bg-transparent py-8">
+                  <div className="w-full max-w-xs rounded-2xl border border-cyan-200/40 bg-slate-950/22 p-5 shadow-[0_12px_30px_rgba(14,116,144,0.26)]">
+                    <p className="text-center text-sm uppercase tracking-[0.2em] text-cyan-100/95 sm:text-base">Animated Preview</p>
+                    <div className="mt-4 flex items-center justify-center rounded-xl border border-white/30 bg-black/28 py-8">
                       <AvatarSpritePreview avatarId={avatarId} />
                     </div>
                   </div>
@@ -551,18 +821,17 @@ export function OnboardingOverlay({
                         key={world.id}
                         type="button"
                         onClick={() => setWorldId(world.id)}
-                        className={`group relative min-h-[220px] overflow-hidden rounded-2xl border bg-cover bg-center text-left transition-[transform,border-color] duration-90 ease-out will-change-transform hover:-translate-y-1 hover:scale-[1.008] ${
-                          selected
-                            ? 'border-cyan-200/80'
-                            : 'border-white/15 hover:border-cyan-200/60'
-                        }`}
+                        className={`group relative min-h-[220px] overflow-hidden rounded-2xl border bg-cover bg-center text-left transition-[transform,border-color] duration-90 ease-out will-change-transform hover:-translate-y-1 hover:scale-[1.008] ${selected
+                          ? 'border-cyan-200/80'
+                          : 'border-white/40 hover:border-cyan-200/80'
+                          }`}
                         style={{ backgroundImage: `url(${world.previewImage})` }}
                       >
-                        <div className="absolute inset-0 bg-gradient-to-t from-slate-950/55 via-slate-900/22 to-slate-900/5" />
+                        <div className="absolute inset-0 bg-gradient-to-t from-slate-950/60 via-slate-900/28 to-slate-900/10" />
                         <div className="relative flex h-full items-end p-2">
-                          <div className="w-full rounded-xl border border-cyan-100/55 bg-black/10 p-4 shadow-[0_4px_14px_rgba(0,0,0,0.22)]">
-                            <p className="text-xl font-semibold text-zinc-100 sm:text-2xl">{world.title}</p>
-                            <p className="mt-1 text-lg text-zinc-300 sm:text-xl">{world.subtitle}</p>
+                          <div className="w-full rounded-xl border border-cyan-100/70 bg-black/38 p-4 shadow-[0_4px_14px_rgba(0,0,0,0.3)]">
+                            <p className="text-xl font-semibold text-zinc-50 sm:text-2xl">{world.title}</p>
+                            <p className="mt-1 text-lg text-zinc-200 sm:text-xl">{world.subtitle}</p>
                           </div>
                         </div>
                         {selected ? (
@@ -582,7 +851,7 @@ export function OnboardingOverlay({
                   <button
                     type="button"
                     onClick={handleBack}
-                    className="w-full rounded-xl border border-white/20 px-4 py-2 text-base font-semibold text-zinc-100 transition-colors duration-75 ease-out hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60 sm:w-auto sm:text-lg"
+                    className="w-full rounded-xl border border-white/45 bg-white/12 px-4 py-2 text-base font-semibold text-zinc-50 transition-colors duration-75 ease-out hover:bg-white/24 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/75 sm:w-auto sm:text-lg"
                   >
                     Back
                   </button>
@@ -602,15 +871,14 @@ export function OnboardingOverlay({
 
       {step === 'roomConfirm' ? (
         <div
-          className={`[contain:layout_paint] w-full max-w-5xl rounded-2xl border border-cyan-200/35 bg-[#09101d]/92 px-5 py-6 shadow-[0_12px_34px_rgba(2,6,23,0.66)] sm:px-7 ${
-            isClosingRoomStrip ? 'onboarding-room-strip-out' : 'onboarding-room-strip-in'
-          }`}
+          className={`ui-flow-box [contain:layout_paint] w-full max-w-5xl px-5 py-6 sm:px-7 ${isClosingRoomStrip ? 'onboarding-room-strip-out' : 'onboarding-room-strip-in'
+            }`}
         >
           <div className="grid gap-5 sm:grid-cols-[2fr_1fr] sm:items-end">
             <div>
               <h2 className="text-4xl font-bold text-zinc-100 sm:text-5xl">Enter room ID</h2>
-              <p className="mt-1 text-lg text-zinc-300 sm:text-xl">Use the same room ID to join friends in the same world.</p>
-              <label htmlFor="onboarding-room-id" className="mt-4 block text-base uppercase tracking-widest text-zinc-400 sm:text-lg">
+              <p className="mt-1 text-lg text-zinc-200 sm:text-xl">Use the same room ID to join friends in the same world.</p>
+              <label htmlFor="onboarding-room-id" className="mt-4 block text-base uppercase tracking-widest text-zinc-200 sm:text-lg">
                 Room ID
               </label>
               <input
@@ -631,7 +899,7 @@ export function OnboardingOverlay({
                 }}
                 disabled={isClosingRoomStrip}
                 maxLength={24}
-                className="mt-2 w-full rounded-xl border border-sky-100/20 bg-black/40 px-4 py-3 text-xl text-zinc-100 outline-none transition-colors duration-75 ease-out focus:border-sky-300/60 focus:ring-2 focus:ring-sky-300/40 disabled:cursor-not-allowed disabled:opacity-70 sm:text-2xl"
+                className="mt-2 w-full rounded-xl border border-sky-100/45 bg-black/52 px-4 py-3 text-xl text-zinc-50 outline-none transition-colors duration-75 ease-out focus:border-sky-300/85 focus:ring-2 focus:ring-sky-300/50 disabled:cursor-not-allowed disabled:opacity-70 sm:text-2xl"
                 placeholder="example-room-01"
               />
               <div className="min-h-6 pt-2 text-base text-rose-300 sm:text-lg">{roomError ?? ''}</div>
@@ -644,7 +912,7 @@ export function OnboardingOverlay({
                   type="button"
                   onClick={handleRoomNo}
                   disabled={isClosingRoomStrip}
-                  className="rounded-xl border border-zinc-100/65 bg-zinc-100/18 px-4 py-2 text-base font-semibold text-zinc-50 shadow-[0_2px_10px_rgba(0,0,0,0.28)] transition-colors duration-75 ease-out hover:bg-zinc-100/28 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/80 disabled:cursor-not-allowed disabled:opacity-70 sm:text-lg"
+                  className="rounded-xl border-2 border-zinc-50/95 bg-zinc-100/55 px-4 py-2 text-base font-semibold text-slate-900 shadow-[0_2px_10px_rgba(0,0,0,0.34)] transition-colors duration-75 ease-out hover:bg-zinc-100/70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:cursor-not-allowed disabled:opacity-70 sm:text-lg"
                 >
                   No
                 </button>
@@ -661,7 +929,7 @@ export function OnboardingOverlay({
                 type="button"
                 onClick={handleBack}
                 disabled={isClosingRoomStrip}
-                className="mt-3 w-full rounded-xl border border-cyan-100/75 bg-cyan-200/15 px-4 py-2 text-base font-semibold uppercase tracking-wider text-cyan-50 shadow-[0_2px_10px_rgba(0,0,0,0.28)] transition-colors duration-75 ease-out hover:bg-cyan-200/24 disabled:cursor-not-allowed disabled:opacity-70 sm:text-lg"
+                className="mt-3 w-full rounded-xl border-2 border-cyan-100 bg-cyan-300/45 px-4 py-2 text-base font-semibold uppercase tracking-wider text-cyan-50 shadow-[0_2px_10px_rgba(0,0,0,0.34)] transition-colors duration-75 ease-out hover:bg-cyan-300/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-100 disabled:cursor-not-allowed disabled:opacity-70 sm:text-lg"
               >
                 Back
               </button>
@@ -740,22 +1008,11 @@ function resolveWorldId(value: string): string {
 }
 
 function validateName(value: string): { ok: true; value: string } | { ok: false; message: string } {
-  const trimmed = value.trim();
-  if (trimmed.length < 2 || trimmed.length > 20) {
-    return { ok: false, message: 'Name must be between 2 and 20 characters.' };
-  }
-  if (!NAME_PATTERN.test(trimmed)) {
-    return { ok: false, message: 'Use letters, numbers, spaces, and underscore only.' };
-  }
-  return { ok: true, value: trimmed };
+  return validateUsername(value);
 }
 
 function validateEmail(value: string): { ok: true; value: string } | { ok: false; message: string } {
-  const trimmed = value.trim().toLowerCase();
-  if (!EMAIL_PATTERN.test(trimmed)) {
-    return { ok: false, message: 'Please enter a valid email address.' };
-  }
-  return { ok: true, value: trimmed };
+  return validateEmailAddress(value);
 }
 
 function validatePassword(value: string): { ok: true; value: string } | { ok: false; message: string } {
@@ -764,6 +1021,58 @@ function validatePassword(value: string): { ok: true; value: string } | { ok: fa
     return { ok: false, message: 'Password must be at least 8 characters.' };
   }
   return { ok: true, value: trimmed };
+}
+
+function getInlineEmailError(value: string): string | null {
+  const validation = validateEmailAddress(value);
+  return validation.ok ? null : validation.message;
+}
+
+function getInlinePasswordError(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return 'Password is required.';
+  }
+
+  if (trimmed.length < 8) {
+    return 'Password must be at least 8 characters.';
+  }
+
+  return null;
+}
+
+function getInlineUsernameError(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return 'Display name is required.';
+  }
+
+  const validation = validateUsername(value);
+  if (!validation.ok) {
+    return formatDisplayNameValidationMessage(validation.message);
+  }
+
+  return null;
+}
+
+function formatDisplayNameValidationMessage(message: string): string {
+  return message.replace(/^Username\b/, 'Display name');
+}
+
+function resolveAvailabilityMessageClass(state: AvailabilityState): string {
+  if (state === 'taken' || state === 'error') {
+    return 'text-rose-300';
+  }
+
+  if (state === 'available') {
+    return 'text-emerald-200';
+  }
+
+  if (state === 'checking') {
+    return 'text-cyan-200';
+  }
+
+  return 'text-zinc-300/85';
 }
 
 function validateRoomId(value: string): { ok: true; value: string } | { ok: false; message: string } {
@@ -778,9 +1087,8 @@ function validateRoomId(value: string): { ok: true; value: string } | { ok: fals
 }
 
 function isAuthPotentiallyValid(email: string, password: string): boolean {
-  const normalizedEmail = email.trim().toLowerCase();
   const normalizedPassword = password.trim();
-  return EMAIL_PATTERN.test(normalizedEmail) && normalizedPassword.length >= 8;
+  return validateEmailAddress(email).ok && normalizedPassword.length >= 8;
 }
 
 function isRoomPotentiallyValid(value: string): boolean {
@@ -799,7 +1107,7 @@ function deriveDisplayNameFromEmail(email: string): string {
     return 'player';
   }
 
-  return sanitized.slice(0, 20);
+  return sanitized.slice(0, USERNAME_MAX_LENGTH);
 }
 
 function getSpriteSheetMetrics(): Promise<SpriteSheetMetrics> {

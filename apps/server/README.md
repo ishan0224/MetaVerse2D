@@ -22,6 +22,8 @@ Rules:
 - App DB does not store passwords. Password handling is delegated to Supabase Auth (`auth.users`).
 - This project does not use app-managed auth cookies for server auth; it uses bearer/handshake JWT transport.
 - Server runtime and Drizzle commands auto-load env from `apps/server/.env` (root `.env` fallback is supported for legacy setup).
+- Socket CORS origin policy is explicit in production via `CLIENT_ORIGIN` (and optional `CLIENT_ORIGIN_PREVIEW` list).
+- Quick tunnel origins (for example `*.trycloudflare.com`) are disabled by default and can be enabled only in non-production via `ALLOW_DEV_TUNNEL_ORIGINS=true`.
 - Minimal persistence HTTP endpoints are exposed for non-realtime access:
   - `GET/POST /api/users`
   - `GET/POST /api/player-state`
@@ -42,6 +44,8 @@ Rules:
    ```text
    SERVER_SUPABASE_URL=https://<project-ref>.supabase.co
    SERVER_SUPABASE_ANON_KEY=<supabase-anon-key>
+   CLIENT_ORIGIN=https://<your-vercel-domain>
+   CLIENT_ORIGIN_PREVIEW=https://<optional-preview-domain-1>,https://<optional-preview-domain-2>
    ```
 4. Ensure frontend sends JWTs:
    - Socket.IO handshake token (`handshake.auth.token`)

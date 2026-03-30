@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { type CSSProperties, useCallback, useEffect, useRef, useState } from 'react';
 
 import { CircularMinimap } from '@/components/CircularMinimap';
 import { JoinStatusOverlay } from '@/components/JoinStatusOverlay';
@@ -10,7 +10,9 @@ import {
   OnboardingOverlay,
   type OnboardingStep,
 } from '@/components/OnboardingOverlay';
+import { RotateDeviceOverlay } from '@/components/RotateDeviceOverlay';
 import { TopRightStatusCluster } from '@/components/TopRightStatusCluster';
+import { TouchGameplayControls } from '@/components/TouchGameplayControls';
 import { VoiceKeyboardBindings } from '@/components/VoiceKeyboardBindings';
 import { ENABLE_TEST_MINIMAP } from '@/config/features';
 import { DEFAULT_AVATAR_ID, normalizeAvatarId } from '@/game/config/characterSpriteConfig';
@@ -26,6 +28,7 @@ import {
   setRuntimeIdentity,
   setSocketUiStatus,
 } from '@/lib/runtimeUiStore';
+import { useGameplayViewport } from '@/lib/useGameplayViewport';
 import {
   getSocketClient,
   setPlayerAvatarId,
@@ -36,9 +39,13 @@ import {
 } from '@/network';
 import { getAuthAccessToken, initializeAuthSession } from '@/network/auth/authSession';
 import { getRTCManager } from '@/network/rtc/rtcManager';
+import { resetMovementInput } from '@/store/useInputStore';
 
 type GameInstance = {
   destroy: (removeCanvas: boolean, noReturn?: boolean) => void;
+  scale?: {
+    resize: (width: number, height: number) => void;
+  };
 };
 
 const PLAYER_NAME_STORAGE_KEY = 'metaverse2d:player-name';
@@ -72,6 +79,7 @@ export function GameCanvas() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const gameRef = useRef<GameInstance | null>(null);
   const handoffTimerRef = useRef<number | null>(null);
+  const gameplayViewport = useGameplayViewport();
   const [isGameReady, setIsGameReady] = useState(false);
   const [joinIdentity, setJoinIdentity] = useState<OnboardingDraft | null>(null);
   const [initialOnboardingDraft, setInitialOnboardingDraft] = useState<OnboardingDraft>(() =>
@@ -98,6 +106,18 @@ export function GameCanvas() {
     });
   }, []);
 
+  const syncGameScaleToContainer = useCallback(() => {
+    const container = containerRef.current;
+    const game = gameRef.current;
+    if (!container || !game?.scale) {
+      return;
+    }
+
+    const width = Math.max(1, Math.floor(container.clientWidth));
+    const height = Math.max(1, Math.floor(container.clientHeight));
+    game.scale.resize(width, height);
+  }, []);
+
   useEffect(() => {
     if (joinIdentity !== null) {
       return;
@@ -112,6 +132,7 @@ export function GameCanvas() {
     void initializeAuthSession().catch((error) => {
       console.error('failed to initialize auth session', error);
     });
+    resetMovementInput();
     resetVoiceControlState();
     resetRuntimeUiState();
     setIsGameReady(false);
@@ -137,6 +158,7 @@ export function GameCanvas() {
         gameRef.current = null;
       }
 
+      resetMovementInput();
       resetVoiceControlState();
       resetRuntimeUiState();
     };
@@ -153,6 +175,33 @@ export function GameCanvas() {
     }
 
     let cancelled = false;
+    let resizeObserver: ResizeObserver | null = null;
+    let rafId: number | null = null;
+
+    const scheduleScaleSync = () => {
+      if (rafId !== null) {
+        window.cancelAnimationFrame(rafId);
+      }
+      rafId = window.requestAnimationFrame(() => {
+        rafId = null;
+        if (cancelled) {
+          return;
+        }
+        syncGameScaleToContainer();
+      });
+    };
+
+    const handleViewportResize = () => {
+      scheduleScaleSync();
+    };
+
+    if (typeof ResizeObserver !== 'undefined') {
+      resizeObserver = new ResizeObserver(handleViewportResize);
+      resizeObserver.observe(container);
+    }
+    window.addEventListener('resize', handleViewportResize);
+    window.addEventListener('orientationchange', handleViewportResize);
+    window.visualViewport?.addEventListener('resize', handleViewportResize);
 
     void (async () => {
       const { initializeGame } = await import('@/game');
@@ -161,6 +210,7 @@ export function GameCanvas() {
       }
 
       gameRef.current = initializeGame(container);
+      scheduleScaleSync();
       await waitForFirstPaint();
       if (cancelled) {
         return;
@@ -185,12 +235,21 @@ export function GameCanvas() {
 
     return () => {
       cancelled = true;
+      if (rafId !== null) {
+        window.cancelAnimationFrame(rafId);
+        rafId = null;
+      }
+      resizeObserver?.disconnect();
+      resizeObserver = null;
+      window.removeEventListener('resize', handleViewportResize);
+      window.removeEventListener('orientationchange', handleViewportResize);
+      window.visualViewport?.removeEventListener('resize', handleViewportResize);
       if (handoffTimerRef.current) {
         window.clearTimeout(handoffTimerRef.current);
         handoffTimerRef.current = null;
       }
     };
-  }, [joinIdentity]);
+  }, [joinIdentity, syncGameScaleToContainer]);
 
   useEffect(() => {
     if (!isGameReady || !joinIdentity) {
@@ -364,12 +423,19 @@ export function GameCanvas() {
       socket.off('players:update', onPlayersUpdateProbe);
 
       rtcManager.destroy();
+      resetMovementInput();
       resetVoiceControlState();
       resetRuntimeUiState();
     };
   }, [isGameReady, joinIdentity]);
 
   const hasJoinedFlowStarted = joinIdentity !== null;
+  const shouldUseTouchGameplayLayout =
+    hasJoinedFlowStarted && gameplayViewport.isMobileOrTablet;
+  const shouldGuardPortraitGameplay =
+    shouldUseTouchGameplayLayout && gameplayViewport.requiresLandscapePrompt;
+  const shouldShowTouchControls =
+    shouldUseTouchGameplayLayout && !shouldGuardPortraitGameplay;
   const shouldUseSelectedWorldBackdrop =
     onboardingVisualState.worldId === DEFAULT_WORLD_ID &&
     (onboardingVisualState.step === 'world' ||
@@ -383,27 +449,71 @@ export function GameCanvas() {
   const gameCanvasOpacityClass =
     handoffState === 'SCREENSHOT_VISIBLE' ? 'opacity-0' : 'opacity-100';
 
+  useEffect(() => {
+    if (!hasJoinedFlowStarted || shouldGuardPortraitGameplay) {
+      resetMovementInput();
+    }
+  }, [hasJoinedFlowStarted, shouldGuardPortraitGameplay]);
+
+  useEffect(() => {
+    if (!hasJoinedFlowStarted) {
+      return;
+    }
+
+    syncGameScaleToContainer();
+  }, [
+    hasJoinedFlowStarted,
+    gameplayViewport.viewportWidth,
+    gameplayViewport.viewportHeight,
+    syncGameScaleToContainer,
+  ]);
+
+  const screenshotLayer = screenshotShouldRender ? (
+    <div
+      className={`pointer-events-none absolute inset-0 z-0 overflow-hidden transition-opacity duration-[240ms] ease-out ${screenshotOpacityClass}`}
+    >
+      <img
+        src={onboardingBackdropSrc}
+        alt=""
+        aria-hidden="true"
+        decoding="sync"
+        fetchPriority="high"
+        className="absolute inset-0 h-full w-full select-none object-cover object-center"
+        draggable={false}
+      />
+    </div>
+  ) : null;
+  const gameplayCanvasElement = (
+    <div
+      ref={containerRef}
+      className={`relative z-10 h-full w-full transition-opacity duration-[240ms] ease-out ${shouldUseTouchGameplayLayout ? 'gameplay-touch-shell' : ''} ${gameCanvasOpacityClass}`}
+    />
+  );
+  const shouldRenderDesktopHud = hasJoinedFlowStarted && !shouldUseTouchGameplayLayout;
+  const shouldRenderTouchHud =
+    hasJoinedFlowStarted && shouldUseTouchGameplayLayout && !shouldGuardPortraitGameplay;
+  const rootViewportStyle: CSSProperties | undefined = shouldUseTouchGameplayLayout
+    ? {
+        width: `${gameplayViewport.viewportWidth}px`,
+        height: `${gameplayViewport.viewportHeight}px`,
+      }
+    : undefined;
+
   return (
-    <div className="relative h-screen w-full overflow-hidden bg-slate-950">
-      {screenshotShouldRender ? (
-        <div
-          className={`pointer-events-none absolute inset-0 z-0 overflow-hidden transition-opacity duration-[240ms] ease-out ${screenshotOpacityClass}`}
-        >
-          <img
-            src={onboardingBackdropSrc}
-            alt=""
-            aria-hidden="true"
-            decoding="sync"
-            fetchPriority="high"
-            className="absolute inset-0 h-full w-full select-none object-cover object-center"
-            draggable={false}
-          />
+    <div className="relative h-screen h-[100dvh] w-full overflow-hidden bg-slate-950" style={rootViewportStyle}>
+      {!shouldUseTouchGameplayLayout ? screenshotLayer : null}
+      {shouldUseTouchGameplayLayout ? (
+        <div className="absolute inset-0 z-10">
+          <div className="relative h-full w-full overflow-hidden bg-slate-950">
+            {screenshotLayer}
+            {gameplayCanvasElement}
+            {shouldRenderTouchHud ? <TopRightStatusCluster touchOptimized /> : null}
+            {shouldRenderTouchHud ? <JoinStatusOverlay touchOptimized /> : null}
+            {shouldRenderTouchHud ? <MicModeCircle placement="top-right-below" touchOptimized /> : null}
+            {shouldShowTouchControls ? <TouchGameplayControls /> : null}
+          </div>
         </div>
       ) : null}
-      <div
-        ref={containerRef}
-        className={`relative z-10 h-full w-full transition-opacity duration-[240ms] ease-out ${gameCanvasOpacityClass}`}
-      />
       {!hasJoinedFlowStarted ? (
         <OnboardingOverlay
           initialDraft={initialOnboardingDraft}
@@ -411,11 +521,13 @@ export function GameCanvas() {
           onVisualStateChange={handleOnboardingVisualStateChange}
         />
       ) : null}
-      {hasJoinedFlowStarted ? <VoiceKeyboardBindings /> : null}
-      {hasJoinedFlowStarted ? <TopRightStatusCluster /> : null}
-      {hasJoinedFlowStarted ? <JoinStatusOverlay /> : null}
-      {hasJoinedFlowStarted ? <MicModeCircle placement="top-right-below" /> : null}
-      {hasJoinedFlowStarted && ENABLE_TEST_MINIMAP ? <CircularMinimap /> : null}
+      {!shouldUseTouchGameplayLayout ? gameplayCanvasElement : null}
+      {shouldRenderDesktopHud ? <VoiceKeyboardBindings /> : null}
+      {shouldRenderDesktopHud ? <TopRightStatusCluster /> : null}
+      {shouldRenderDesktopHud ? <JoinStatusOverlay /> : null}
+      {shouldRenderDesktopHud ? <MicModeCircle placement="top-right-below" /> : null}
+      {shouldRenderDesktopHud && ENABLE_TEST_MINIMAP ? <CircularMinimap /> : null}
+      {shouldGuardPortraitGameplay ? <RotateDeviceOverlay /> : null}
     </div>
   );
 }

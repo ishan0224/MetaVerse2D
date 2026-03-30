@@ -5,10 +5,10 @@ import {
   getRoomId,
   getWorldId,
   listenToPlayerUpdates,
-  sendInput,
   setRoomId,
   setWorldId,
 } from '@/network';
+import { MovementSyncEmitter } from '@/network/movementSync';
 
 type PlayerSnapshot = {
   id: string;
@@ -39,14 +39,13 @@ type PlayersUpdatePayload = {
   proximity: Record<string, string[]>;
 };
 
-const INPUT_DELTA_STEP_MS = 100;
-
 export class MultiplayerSystem {
   private unsubscribe: (() => void) | null = null;
   private localPlayer: PlayerSnapshot | null = null;
   private readonly remotePlayers = new Map<string, PlayerSnapshot>();
   private proximityByPlayerId: Record<string, string[]> = {};
   private activeScopeId: string | null = null;
+  private readonly movementSyncEmitter = new MovementSyncEmitter();
 
   public start(): void {
     this.unsubscribe = listenToPlayerUpdates((payload) => {
@@ -59,23 +58,11 @@ export class MultiplayerSystem {
       this.unsubscribe();
       this.unsubscribe = null;
     }
+    this.movementSyncEmitter.reset();
   }
 
   public pushInput(input: InputState, delta: number): void {
-    let remainingDelta = Math.max(delta, 0);
-    if (remainingDelta === 0) {
-      sendInput(input, 0);
-      return;
-    }
-
-    while (remainingDelta > 0) {
-      const stepDelta = Math.min(INPUT_DELTA_STEP_MS, remainingDelta);
-      sendInput(input, stepDelta);
-      remainingDelta -= stepDelta;
-      if (remainingDelta < 0.001) {
-        break;
-      }
-    }
+    this.movementSyncEmitter.pushInput(input, delta);
   }
 
   public getLocalPlayer(): PlayerSnapshot | null {

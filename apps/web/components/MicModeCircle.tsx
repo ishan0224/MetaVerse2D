@@ -6,9 +6,13 @@ import { getVoiceControlState, subscribeToVoiceControlState } from '@/game/syste
 
 type MicModeCircleProps = {
   placement?: 'bottom-right' | 'top-right-below';
+  touchOptimized?: boolean;
 };
 
-export function MicModeCircle({ placement = 'bottom-right' }: MicModeCircleProps) {
+export function MicModeCircle({
+  placement = 'bottom-right',
+  touchOptimized = false,
+}: MicModeCircleProps) {
   const voiceState = useSyncExternalStore(
     subscribeToVoiceControlState,
     getVoiceControlState,
@@ -19,9 +23,16 @@ export function MicModeCircle({ placement = 'bottom-right' }: MicModeCircleProps
     voiceState.mode === 'PUSH_TO_TALK' &&
     (voiceState.keyboardPushToTalkPressed || voiceState.uiPushToTalkPressed);
 
+  const safeAreaStyle = touchOptimized
+    ? {
+        paddingRight: 'max(0px, env(safe-area-inset-right))',
+        paddingTop: 'max(0px, env(safe-area-inset-top))',
+        paddingBottom: 'max(0px, env(safe-area-inset-bottom))',
+      }
+    : undefined;
   const circleElement = (
     <div
-      className={`flex h-11 w-11 items-center justify-center rounded-full border border-white/20 bg-black/60 text-zinc-100 shadow-md backdrop-blur transition-transform duration-150 ease-out sm:h-12 sm:w-12 ${
+      className={`flex items-center justify-center rounded-full border border-white/20 bg-black/60 text-zinc-100 shadow-md backdrop-blur transition-transform duration-150 ease-out ${touchOptimized ? 'h-14 w-14' : 'h-11 w-11 sm:h-12 sm:w-12'} ${
         pushToTalkActive ? '-translate-y-1.5' : 'translate-y-0'
       }`}
       aria-label={getAriaLabel(voiceState.mode)}
@@ -34,14 +45,20 @@ export function MicModeCircle({ placement = 'bottom-right' }: MicModeCircleProps
 
   if (placement === 'top-right-below') {
     return (
-      <div className="pointer-events-none absolute right-3 top-16 z-20 sm:right-4 sm:top-[4.5rem]">
+      <div
+        className={`pointer-events-none absolute z-20 ${touchOptimized ? 'right-2 top-20' : 'right-3 top-16 sm:right-4 sm:top-[4.5rem]'}`}
+        style={safeAreaStyle}
+      >
         {circleElement}
       </div>
     );
   }
 
   return (
-    <div className="pointer-events-none absolute bottom-4 right-3 z-20 sm:bottom-5 sm:right-4">
+    <div
+      className={`pointer-events-none absolute z-20 ${touchOptimized ? 'bottom-3 right-2' : 'bottom-4 right-3 sm:bottom-5 sm:right-4'}`}
+      style={safeAreaStyle}
+    >
       {circleElement}
     </div>
   );
