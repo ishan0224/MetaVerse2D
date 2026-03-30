@@ -6,10 +6,14 @@ type WebRtcIceServer = {
 
 const NODE_ENV = process.env.NODE_ENV ?? 'development';
 const IS_PRODUCTION = NODE_ENV === 'production';
-
-function readEnv(name: string): string {
-  return process.env[name]?.trim() ?? '';
-}
+const RAW_APP_NAME = process.env.NEXT_PUBLIC_APP_NAME?.trim() ?? '';
+const RAW_SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL?.trim() ?? '';
+const RAW_SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ?? '';
+const RAW_SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() ?? '';
+const RAW_WEBRTC_STUN_URLS = process.env.NEXT_PUBLIC_WEBRTC_STUN_URLS?.trim() ?? '';
+const RAW_WEBRTC_TURN_URLS = process.env.NEXT_PUBLIC_WEBRTC_TURN_URLS?.trim() ?? '';
+const RAW_WEBRTC_TURN_USERNAME = process.env.NEXT_PUBLIC_WEBRTC_TURN_USERNAME?.trim() ?? '';
+const RAW_WEBRTC_TURN_CREDENTIAL = process.env.NEXT_PUBLIC_WEBRTC_TURN_CREDENTIAL?.trim() ?? '';
 
 function assertUrl(name: string, value: string): string {
   try {
@@ -31,9 +35,8 @@ function parseCsv(value: string): string[] {
 }
 
 function resolveSocketUrl(): string {
-  const raw = readEnv('NEXT_PUBLIC_SOCKET_URL');
-  if (raw) {
-    return assertUrl('NEXT_PUBLIC_SOCKET_URL', raw);
+  if (RAW_SOCKET_URL) {
+    return assertUrl('NEXT_PUBLIC_SOCKET_URL', RAW_SOCKET_URL);
   }
   if (IS_PRODUCTION) {
     throw new Error('[web env] NEXT_PUBLIC_SOCKET_URL is required in production.');
@@ -42,29 +45,27 @@ function resolveSocketUrl(): string {
 }
 
 function resolveSupabaseUrl(): string {
-  const raw = readEnv('NEXT_PUBLIC_SUPABASE_URL');
-  if (!raw && IS_PRODUCTION) {
+  if (!RAW_SUPABASE_URL && IS_PRODUCTION) {
     throw new Error('[web env] NEXT_PUBLIC_SUPABASE_URL is required in production.');
   }
-  return raw ? assertUrl('NEXT_PUBLIC_SUPABASE_URL', raw) : '';
+  return RAW_SUPABASE_URL ? assertUrl('NEXT_PUBLIC_SUPABASE_URL', RAW_SUPABASE_URL) : '';
 }
 
 function resolveSupabaseAnonKey(): string {
-  const raw = readEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY');
-  if (!raw && IS_PRODUCTION) {
+  if (!RAW_SUPABASE_ANON_KEY && IS_PRODUCTION) {
     throw new Error('[web env] NEXT_PUBLIC_SUPABASE_ANON_KEY is required in production.');
   }
-  return raw;
+  return RAW_SUPABASE_ANON_KEY;
 }
 
 function resolveWebRtcIceServers(): WebRtcIceServer[] {
-  const configuredStunUrls = parseCsv(readEnv('NEXT_PUBLIC_WEBRTC_STUN_URLS'));
+  const configuredStunUrls = parseCsv(RAW_WEBRTC_STUN_URLS);
   const stunUrls =
     configuredStunUrls.length > 0 ? configuredStunUrls : ['stun:stun.l.google.com:19302'];
 
-  const turnUrls = parseCsv(readEnv('NEXT_PUBLIC_WEBRTC_TURN_URLS'));
-  const turnUsername = readEnv('NEXT_PUBLIC_WEBRTC_TURN_USERNAME');
-  const turnCredential = readEnv('NEXT_PUBLIC_WEBRTC_TURN_CREDENTIAL');
+  const turnUrls = parseCsv(RAW_WEBRTC_TURN_URLS);
+  const turnUsername = RAW_WEBRTC_TURN_USERNAME;
+  const turnCredential = RAW_WEBRTC_TURN_CREDENTIAL;
 
   const hasTurnUrls = turnUrls.length > 0;
   const hasTurnAuth = Boolean(turnUsername && turnCredential);
@@ -95,7 +96,7 @@ function resolveWebRtcIceServers(): WebRtcIceServer[] {
 }
 
 export const webEnv = {
-  appName: readEnv('NEXT_PUBLIC_APP_NAME') || 'MetaVerse2D',
+  appName: RAW_APP_NAME || 'MetaVerse2D',
   socketUrl: resolveSocketUrl(),
   supabaseUrl: resolveSupabaseUrl(),
   supabaseAnonKey: resolveSupabaseAnonKey(),
