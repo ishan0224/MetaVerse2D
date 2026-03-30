@@ -391,50 +391,53 @@ export function OnboardingOverlay({
     setNameError(null);
     setIsAuthSubmitting(true);
 
-    const hasMatchingSession =
-      authMode === 'SIGN_UP' &&
-      Boolean(authSession.accessToken) &&
-      authSession.user?.email?.trim().toLowerCase() === emailValidation.value;
+    try {
+      const hasMatchingSession =
+        authMode === 'SIGN_UP' &&
+        Boolean(authSession.accessToken) &&
+        authSession.user?.email?.trim().toLowerCase() === emailValidation.value;
 
-    const authResult = hasMatchingSession
-      ? { ok: true, user: authSession.user ?? null }
-      : authMode === 'LOGIN'
-        ? await signInWithEmailPassword(emailValidation.value, passwordValidation.value)
-        : await signUpWithEmailPassword(emailValidation.value, passwordValidation.value);
+      const authResult = hasMatchingSession
+        ? { ok: true, user: authSession.user ?? null }
+        : authMode === 'LOGIN'
+          ? await signInWithEmailPassword(emailValidation.value, passwordValidation.value)
+          : await signUpWithEmailPassword(emailValidation.value, passwordValidation.value);
 
-    if (authResult.ok && authMode === 'SIGN_UP') {
-      const accessToken = getAuthAccessToken();
-      if (!accessToken) {
-        setIsAuthSubmitting(false);
-        setAuthError('Authentication succeeded, but no active session is available yet.');
-        return;
-      }
-
-      const profileResult = await upsertUserProfile(accessToken, resolvedName);
-      if (!profileResult.ok) {
-        setIsAuthSubmitting(false);
-        if (profileResult.code === 'EMAIL_TAKEN' || profileResult.status === 409) {
-          setAuthError('Email is already registered.');
-          setEmailAvailabilityState('taken');
-          setEmailAvailabilityMessage('Email is already registered.');
-          emailCacheRef.current.set(emailValidation.value, false);
+      if (authResult.ok && authMode === 'SIGN_UP') {
+        const accessToken = getAuthAccessToken();
+        if (!accessToken) {
+          setAuthError('Authentication succeeded, but no active session is available yet.');
           return;
         }
 
-        setAuthError(profileResult.message);
+        const profileResult = await upsertUserProfile(accessToken, resolvedName);
+        if (!profileResult.ok) {
+          if (profileResult.code === 'EMAIL_TAKEN' || profileResult.status === 409) {
+            setAuthError('Email is already registered.');
+            setEmailAvailabilityState('taken');
+            setEmailAvailabilityMessage('Email is already registered.');
+            emailCacheRef.current.set(emailValidation.value, false);
+            return;
+          }
+
+          setAuthError(profileResult.message);
+          return;
+        }
+      }
+
+      if (!authResult.ok) {
+        setAuthError(authResult.message ?? 'Authentication failed. Please try again.');
         return;
       }
+
+      setNameValue(resolvedName);
+      setStep('avatar');
+    } catch (error) {
+      console.error('onboarding proceedFromName failed', error);
+      setAuthError('Unable to complete authentication right now. Please retry.');
+    } finally {
+      setIsAuthSubmitting(false);
     }
-
-    setIsAuthSubmitting(false);
-
-    if (!authResult.ok) {
-      setAuthError(authResult.message ?? 'Authentication failed. Please try again.');
-      return;
-    }
-
-    setNameValue(resolvedName);
-    setStep('avatar');
   };
 
   const continueWithSavedSession = async () => {
@@ -454,19 +457,26 @@ export function OnboardingOverlay({
       resolvedName = signUpNameValidation.value;
 
       setIsAuthSubmitting(true);
-      const profileResult = await upsertUserProfile(authSession.accessToken, resolvedName);
-      setIsAuthSubmitting(false);
-      if (!profileResult.ok) {
-        if (profileResult.code === 'EMAIL_TAKEN' || profileResult.status === 409) {
-          setAuthError('Email is already registered.');
-          setEmailAvailabilityState('taken');
-          setEmailAvailabilityMessage('Email is already registered.');
-          emailCacheRef.current.set(sessionEmail, false);
+      try {
+        const profileResult = await upsertUserProfile(authSession.accessToken, resolvedName);
+        if (!profileResult.ok) {
+          if (profileResult.code === 'EMAIL_TAKEN' || profileResult.status === 409) {
+            setAuthError('Email is already registered.');
+            setEmailAvailabilityState('taken');
+            setEmailAvailabilityMessage('Email is already registered.');
+            emailCacheRef.current.set(sessionEmail, false);
+            return;
+          }
+
+          setAuthError(profileResult.message);
           return;
         }
-
-        setAuthError(profileResult.message);
+      } catch (error) {
+        console.error('onboarding continueWithSavedSession failed', error);
+        setAuthError('Unable to save profile right now. Please retry.');
         return;
+      } finally {
+        setIsAuthSubmitting(false);
       }
     } else if (nameValue.trim()) {
       const loginNameValidation = validateName(nameValue);
@@ -555,7 +565,7 @@ export function OnboardingOverlay({
 
   return (
     <div
-      className="onboarding-readable-text absolute inset-0 z-40 flex items-start justify-center overflow-y-auto bg-[radial-gradient(circle_at_20%_20%,rgba(56,189,248,0.2),transparent_44%),radial-gradient(circle_at_80%_80%,rgba(251,146,60,0.2),transparent_42%),rgba(3,7,18,0.72)] px-3 py-4 sm:items-center sm:p-6"
+      className="onboarding-shell onboarding-readable-text absolute inset-0 z-40 flex items-start justify-center overflow-y-auto bg-[radial-gradient(circle_at_20%_20%,rgba(56,189,248,0.2),transparent_44%),radial-gradient(circle_at_80%_80%,rgba(251,146,60,0.2),transparent_42%),rgba(3,7,18,0.72)] px-3 sm:px-6"
       onKeyDown={handleRootKeyDown}
       style={{ fontFamily: '"Small Pixel-7", "Neon Pixel-7", "Pixelify Sans", "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif' }}
     >
@@ -870,69 +880,72 @@ export function OnboardingOverlay({
       ) : null}
 
       {step === 'roomConfirm' ? (
-        <div
-          className={`ui-flow-box [contain:layout_paint] w-full max-w-5xl px-5 py-6 sm:px-7 ${isClosingRoomStrip ? 'onboarding-room-strip-out' : 'onboarding-room-strip-in'
+        <div className="w-full max-w-5xl sm:flex sm:min-h-full sm:items-center">
+          <div
+            className={`ui-flow-box [contain:layout_paint] w-full px-5 py-6 sm:px-7 ${
+              isClosingRoomStrip ? 'onboarding-room-strip-out' : 'onboarding-room-strip-in'
             }`}
-        >
-          <div className="grid gap-5 sm:grid-cols-[2fr_1fr] sm:items-end">
-            <div>
-              <h2 className="text-4xl font-bold text-zinc-100 sm:text-5xl">Enter room ID</h2>
-              <p className="mt-1 text-lg text-zinc-200 sm:text-xl">Use the same room ID to join friends in the same world.</p>
-              <label htmlFor="onboarding-room-id" className="mt-4 block text-base uppercase tracking-widest text-zinc-200 sm:text-lg">
-                Room ID
-              </label>
-              <input
-                ref={roomInputRef}
-                id="onboarding-room-id"
-                value={roomId}
-                onChange={(event) => {
-                  setRoomId(event.target.value);
-                  if (roomError) {
-                    setRoomError(null);
-                  }
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
-                    event.preventDefault();
-                    confirmRoomSelection();
-                  }
-                }}
-                disabled={isClosingRoomStrip}
-                maxLength={24}
-                className="mt-2 w-full rounded-xl border border-sky-100/45 bg-black/52 px-4 py-3 text-xl text-zinc-50 outline-none transition-colors duration-75 ease-out focus:border-sky-300/85 focus:ring-2 focus:ring-sky-300/50 disabled:cursor-not-allowed disabled:opacity-70 sm:text-2xl"
-                placeholder="example-room-01"
-              />
-              <div className="min-h-6 pt-2 text-base text-rose-300 sm:text-lg">{roomError ?? ''}</div>
-            </div>
-
-            <div className="sm:pb-1">
-              <p className="text-lg font-semibold uppercase tracking-[0.18em] text-cyan-50 sm:text-xl">Are you sure?</p>
-              <div className="mt-3 grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={handleRoomNo}
+          >
+            <div className="grid gap-5 sm:grid-cols-[2fr_1fr] sm:items-end">
+              <div>
+                <h2 className="text-4xl font-bold text-zinc-100 sm:text-5xl">Enter room ID</h2>
+                <p className="mt-1 text-lg text-zinc-200 sm:text-xl">Use the same room ID to join friends in the same world.</p>
+                <label htmlFor="onboarding-room-id" className="mt-4 block text-base uppercase tracking-widest text-zinc-200 sm:text-lg">
+                  Room ID
+                </label>
+                <input
+                  ref={roomInputRef}
+                  id="onboarding-room-id"
+                  value={roomId}
+                  onChange={(event) => {
+                    setRoomId(event.target.value);
+                    if (roomError) {
+                      setRoomError(null);
+                    }
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      confirmRoomSelection();
+                    }
+                  }}
                   disabled={isClosingRoomStrip}
-                  className="rounded-xl border-2 border-zinc-50/95 bg-zinc-100/55 px-4 py-2 text-base font-semibold text-slate-900 shadow-[0_2px_10px_rgba(0,0,0,0.34)] transition-colors duration-75 ease-out hover:bg-zinc-100/70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:cursor-not-allowed disabled:opacity-70 sm:text-lg"
-                >
-                  No
-                </button>
+                  maxLength={24}
+                  className="mt-2 w-full rounded-xl border border-sky-100/45 bg-black/52 px-4 py-3 text-xl text-zinc-50 outline-none transition-colors duration-75 ease-out focus:border-sky-300/85 focus:ring-2 focus:ring-sky-300/50 disabled:cursor-not-allowed disabled:opacity-70 sm:text-2xl"
+                  placeholder="example-room-01"
+                />
+                <div className="min-h-6 pt-2 text-base text-rose-300 sm:text-lg">{roomError ?? ''}</div>
+              </div>
+
+              <div className="sm:pb-1">
+                <p className="text-lg font-semibold uppercase tracking-[0.18em] text-cyan-50 sm:text-xl">Are you sure?</p>
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={handleRoomNo}
+                    disabled={isClosingRoomStrip}
+                    className="rounded-xl border-2 border-zinc-50/95 bg-zinc-100/55 px-4 py-2 text-base font-semibold text-slate-900 shadow-[0_2px_10px_rgba(0,0,0,0.34)] transition-colors duration-75 ease-out hover:bg-zinc-100/70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:cursor-not-allowed disabled:opacity-70 sm:text-lg"
+                  >
+                    No
+                  </button>
+                  <button
+                    type="button"
+                    onClick={confirmRoomSelection}
+                    disabled={isClosingRoomStrip || !canConfirmRoom}
+                    className="rounded-xl bg-gradient-to-r from-orange-400 to-amber-300 px-4 py-2 text-base font-bold text-slate-950 transition duration-75 ease-out hover:from-orange-300 hover:to-amber-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-100 disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:from-orange-400 disabled:hover:to-amber-300 sm:text-lg"
+                  >
+                    Yes
+                  </button>
+                </div>
                 <button
                   type="button"
-                  onClick={confirmRoomSelection}
-                  disabled={isClosingRoomStrip || !canConfirmRoom}
-                  className="rounded-xl bg-gradient-to-r from-orange-400 to-amber-300 px-4 py-2 text-base font-bold text-slate-950 transition duration-75 ease-out hover:from-orange-300 hover:to-amber-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-100 disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:from-orange-400 disabled:hover:to-amber-300 sm:text-lg"
+                  onClick={handleBack}
+                  disabled={isClosingRoomStrip}
+                  className="mt-3 w-full rounded-xl border-2 border-cyan-100 bg-cyan-300/45 px-4 py-2 text-base font-semibold uppercase tracking-wider text-cyan-50 shadow-[0_2px_10px_rgba(0,0,0,0.34)] transition-colors duration-75 ease-out hover:bg-cyan-300/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-100 disabled:cursor-not-allowed disabled:opacity-70 sm:text-lg"
                 >
-                  Yes
+                  Back
                 </button>
               </div>
-              <button
-                type="button"
-                onClick={handleBack}
-                disabled={isClosingRoomStrip}
-                className="mt-3 w-full rounded-xl border-2 border-cyan-100 bg-cyan-300/45 px-4 py-2 text-base font-semibold uppercase tracking-wider text-cyan-50 shadow-[0_2px_10px_rgba(0,0,0,0.34)] transition-colors duration-75 ease-out hover:bg-cyan-300/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-100 disabled:cursor-not-allowed disabled:opacity-70 sm:text-lg"
-              >
-                Back
-              </button>
             </div>
           </div>
         </div>
