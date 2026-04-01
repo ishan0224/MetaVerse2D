@@ -1,5 +1,12 @@
-import type { NearbyPlayersMap } from '@metaverse2d/shared';
-import type { InputState } from '@metaverse2d/shared';
+import {
+  CHAT_EVENT_MESSAGE,
+  CHAT_EVENT_SEND,
+  type InputState,
+  MAX_CHAT_TEXT_LENGTH,
+  type NearbyPlayersMap,
+  type RoomChatMessage,
+  type RoomChatSendPayload,
+} from '@metaverse2d/shared';
 import type { Server as SocketIOServer, Socket } from 'socket.io';
 
 import type { AuthenticatedSupabaseUser } from '../auth/supabaseAuth';
@@ -224,6 +231,32 @@ export function registerSocketHandlers(io: SocketIOServer, socket: Socket): void
     io.to(scopeId).emit(PLAYERS_UPDATE_EVENT, buildPlayersUpdatePayload(scopeId));
   });
 
+  socket.on(CHAT_EVENT_SEND, (payload: RoomChatSendPayload) => {
+    const normalizedText = normalizeChatText(payload?.text);
+    if (!normalizedText) {
+      return;
+    }
+
+    const sender = playerManager.getPlayer(socket.id);
+    if (!sender) {
+      return;
+    }
+
+    const scopeId = buildScopeId(sender.worldId, sender.roomId);
+    const fallbackEmail = authUser.email ?? `${authUser.authUserId}@users.local`;
+    const roomChatMessage: RoomChatMessage = {
+      id: createRoomChatMessageId(socket.id),
+      roomScopeId: scopeId,
+      senderId: socket.id,
+      senderName: sender.name || resolvePlayerName(undefined, undefined, fallbackEmail),
+      avatarId: sender.avatarId,
+      text: normalizedText,
+      sentAt: Date.now(),
+    };
+
+    io.to(scopeId).emit(CHAT_EVENT_MESSAGE, roomChatMessage);
+  });
+
   socket.on('disconnect', () => {
     const player = playerManager.getPlayer(socket.id);
     const userId = socketPersistenceUserIds.get(socket.id);
@@ -348,4 +381,17 @@ function normalizeRoomId(roomId: string | undefined): string {
 
 function buildScopeId(worldId: string, roomId: string): string {
   return `${worldId}::${roomId}`;
+}
+
+function normalizeChatText(text: string | undefined): string {
+  const trimmed = text?.trim() ?? '';
+  if (!trimmed) {
+    return '';
+  }
+
+  return trimmed.slice(0, MAX_CHAT_TEXT_LENGTH);
+}
+
+function createRoomChatMessageId(socketId: string): string {
+  return `${Date.now()}-${socketId}-${Math.random().toString(36).slice(2, 8)}`;
 }
