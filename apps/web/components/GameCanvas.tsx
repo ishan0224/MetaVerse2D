@@ -10,6 +10,7 @@ import {
   OnboardingOverlay,
   type OnboardingStep,
 } from '@/components/OnboardingOverlay';
+import { RoomChatOverlay } from '@/components/RoomChatOverlay';
 import { RotateDeviceOverlay } from '@/components/RotateDeviceOverlay';
 import { TopRightStatusCluster } from '@/components/TopRightStatusCluster';
 import { TouchGameplayControls } from '@/components/TouchGameplayControls';
@@ -18,6 +19,11 @@ import { ENABLE_TEST_MINIMAP } from '@/config/features';
 import { DEFAULT_AVATAR_ID, normalizeAvatarId } from '@/game/config/characterSpriteConfig';
 import { WORLD_CONFIG } from '@/game/config/worldConfig';
 import { resetVoiceControlState } from '@/game/systems/voiceControlStore';
+import {
+  appendRoomChatMessage,
+  resetRoomChatState,
+  setRoomChatScope,
+} from '@/lib/chatUiStore';
 import {
   resetRuntimeUiState,
   setJoinUiPhase,
@@ -30,10 +36,11 @@ import {
 } from '@/lib/runtimeUiStore';
 import { useGameplayViewport } from '@/lib/useGameplayViewport';
 import {
-  getSocketClient,
-  setPlayerAvatarId,
-  setPlayerAvatarUrl,
-  setPlayerName,
+    getSocketClient,
+    listenToRoomChatMessages,
+    setPlayerAvatarId,
+    setPlayerAvatarUrl,
+    setPlayerName,
   setRoomId,
   setWorldId,
 } from '@/network';
@@ -134,6 +141,7 @@ export function GameCanvas() {
     });
     resetMovementInput();
     resetVoiceControlState();
+    resetRoomChatState();
     resetRuntimeUiState();
     setIsGameReady(false);
     setHandoffState('SCREENSHOT_VISIBLE');
@@ -160,6 +168,7 @@ export function GameCanvas() {
 
       resetMovementInput();
       resetVoiceControlState();
+      resetRoomChatState();
       resetRuntimeUiState();
     };
   }, []);
@@ -274,6 +283,7 @@ export function GameCanvas() {
     }
 
     resetVoiceControlState();
+    resetRoomChatState();
     resetRuntimeUiState();
     setSocketUiStatus('CONNECTING');
     setJoinUiPhase('CONNECTING');
@@ -286,6 +296,7 @@ export function GameCanvas() {
     setRoomId(requestedRoomId);
     setPlayerAvatarId(requestedAvatarId);
     setPlayerAvatarUrl(null);
+    setRoomChatScope(requestedWorldId, requestedRoomId);
 
     const onConnect = () => {
       setSocketUiStatus('CONNECTED');
@@ -341,6 +352,7 @@ export function GameCanvas() {
       const scopedPlayers = payload.players.filter(
         (player) => player.worldId === activeWorldId && player.roomId === activeRoomId,
       );
+      setRoomChatScope(activeWorldId, activeRoomId);
       setRoomPopulation(scopedPlayers.length > 0 ? scopedPlayers.length : payload.players.length);
 
       if (ENABLE_TEST_MINIMAP) {
@@ -405,6 +417,9 @@ export function GameCanvas() {
     socket.on('connect_error', onConnectError);
     socket.io.on('reconnect_attempt', onReconnectAttempt);
     socket.on('players:update', onPlayersUpdateProbe);
+    const unsubscribeRoomChatMessages = listenToRoomChatMessages((message) => {
+      appendRoomChatMessage(message);
+    });
 
     rtcManager.initialize();
     socket.connect();
@@ -421,10 +436,12 @@ export function GameCanvas() {
       socket.off('connect_error', onConnectError);
       socket.io.off('reconnect_attempt', onReconnectAttempt);
       socket.off('players:update', onPlayersUpdateProbe);
+      unsubscribeRoomChatMessages();
 
       rtcManager.destroy();
       resetMovementInput();
       resetVoiceControlState();
+      resetRoomChatState();
       resetRuntimeUiState();
     };
   }, [isGameReady, joinIdentity]);
@@ -492,6 +509,7 @@ export function GameCanvas() {
   const shouldRenderDesktopHud = hasJoinedFlowStarted && !shouldUseTouchGameplayLayout;
   const shouldRenderTouchHud =
     hasJoinedFlowStarted && shouldUseTouchGameplayLayout && !shouldGuardPortraitGameplay;
+  const shouldRenderChatOverlay = hasJoinedFlowStarted && !shouldUseTouchGameplayLayout;
   const rootViewportStyle: CSSProperties | undefined = shouldUseTouchGameplayLayout
     ? {
         width: `${gameplayViewport.viewportWidth}px`,
@@ -510,6 +528,7 @@ export function GameCanvas() {
             {shouldRenderTouchHud ? <TopRightStatusCluster touchOptimized /> : null}
             {shouldRenderTouchHud ? <JoinStatusOverlay touchOptimized /> : null}
             {shouldRenderTouchHud ? <MicModeCircle placement="top-right-below" touchOptimized /> : null}
+            {shouldRenderTouchHud ? <RoomChatOverlay touchOptimized /> : null}
             {shouldShowTouchControls ? <TouchGameplayControls /> : null}
           </div>
         </div>
@@ -526,6 +545,7 @@ export function GameCanvas() {
       {shouldRenderDesktopHud ? <TopRightStatusCluster /> : null}
       {shouldRenderDesktopHud ? <JoinStatusOverlay /> : null}
       {shouldRenderDesktopHud ? <MicModeCircle placement="top-right-below" /> : null}
+      {shouldRenderChatOverlay ? <RoomChatOverlay /> : null}
       {shouldRenderDesktopHud && ENABLE_TEST_MINIMAP ? <CircularMinimap /> : null}
       {shouldGuardPortraitGameplay ? <RotateDeviceOverlay /> : null}
     </div>

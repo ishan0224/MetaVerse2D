@@ -1,3 +1,10 @@
+import {
+  CHAT_EVENT_MESSAGE,
+  CHAT_EVENT_SEND,
+  MAX_CHAT_TEXT_LENGTH,
+  type RoomChatMessage,
+  type RoomChatSendPayload,
+} from '@metaverse2d/shared';
 import type { InputState } from '@metaverse2d/shared/types/InputState';
 import { io, type Socket } from 'socket.io-client';
 
@@ -39,6 +46,7 @@ type ServerToClientEvents = {
   'webrtc:offer': (payload: { fromId: string; offer: WebRTCSessionDescription }) => void;
   'webrtc:answer': (payload: { fromId: string; answer: WebRTCSessionDescription }) => void;
   'webrtc:ice-candidate': (payload: { fromId: string; candidate: WebRTCIceCandidate }) => void;
+  [CHAT_EVENT_MESSAGE]: (payload: RoomChatMessage) => void;
 };
 
 type ClientToServerEvents = {
@@ -53,6 +61,7 @@ type ClientToServerEvents = {
   'webrtc:offer': (payload: { targetId: string; offer: WebRTCSessionDescription }) => void;
   'webrtc:answer': (payload: { targetId: string; answer: WebRTCSessionDescription }) => void;
   'webrtc:ice-candidate': (payload: { targetId: string; candidate: WebRTCIceCandidate }) => void;
+  [CHAT_EVENT_SEND]: (payload: RoomChatSendPayload) => void;
 };
 
 type GameSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
@@ -200,4 +209,38 @@ export function onWebRTCIceCandidate(
   return () => {
     client.off('webrtc:ice-candidate', callback);
   };
+}
+
+export function sendRoomChatMessage(text: string): boolean {
+  const normalizedText = normalizeChatText(text);
+  if (!normalizedText) {
+    return false;
+  }
+
+  const client = getSocketClient();
+  if (!client.connected || !getAuthAccessToken()) {
+    return false;
+  }
+
+  client.emit(CHAT_EVENT_SEND, { text: normalizedText });
+  return true;
+}
+
+export function listenToRoomChatMessages(
+  callback: (payload: RoomChatMessage) => void,
+): () => void {
+  const client = getSocketClient();
+  client.on(CHAT_EVENT_MESSAGE, callback);
+  return () => {
+    client.off(CHAT_EVENT_MESSAGE, callback);
+  };
+}
+
+function normalizeChatText(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return '';
+  }
+
+  return trimmed.slice(0, MAX_CHAT_TEXT_LENGTH);
 }
