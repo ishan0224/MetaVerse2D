@@ -51,4 +51,8 @@ export class RoomManager {
   public getRoomForPlayer(playerId: string): string | null {
     return this.playerRooms.get(playerId) ?? null;
   }
+
+  public getAllRoomIds(): string[] {
+    return Array.from(this.roomPlayers.keys());
+  }
 }

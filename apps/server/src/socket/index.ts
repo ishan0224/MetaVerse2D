@@ -4,7 +4,7 @@ import { Server as SocketIOServer, type Socket } from 'socket.io';
 
 import { verifySupabaseAccessToken } from '../auth/supabaseAuth';
 import { resolveServerRuntimeEnv } from '../core/loadEnvironment';
-import { registerSocketHandlers } from './handlers';
+import { registerSocketHandlers, startGameTick } from './handlers';
 
 export function attachSocketServer(httpServer: HttpServer): SocketIOServer {
   const runtimeEnv = resolveServerRuntimeEnv();
@@ -46,6 +46,8 @@ export function attachSocketServer(httpServer: HttpServer): SocketIOServer {
   io.on('connection', (socket) => {
     registerSocketHandlers(io, socket);
   });
+
+  startGameTick(io);
 
   return io;
 }

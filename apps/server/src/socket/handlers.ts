@@ -19,6 +19,8 @@ type MovePayload = {
   playerId: string;
   input: InputState;
   delta: number;
+  inputSeq?: number;
+  clientSentAtMs?: number;
 };
 
 type SessionDescriptionPayload = {
@@ -57,6 +59,8 @@ type WebRTCIceCandidateRelayPayload = {
 };
 
 type PlayersUpdatePayload = {
+  snapshotSeq: number;
+  serverTimeMs: number;
   players: Array<{
     id: string;
     x: number;
@@ -68,6 +72,8 @@ type PlayersUpdatePayload = {
     avatarId?: number;
     avatarUrl?: string;
     timestamp: number;
+    serverTimeMs: number;
+    lastProcessedInputSeq?: number;
   }>;
   proximity: NearbyPlayersMap;
 };
@@ -78,16 +84,24 @@ const JOIN_EVENT = 'join';
 const WEBRTC_OFFER_EVENT = 'webrtc:offer';
 const WEBRTC_ANSWER_EVENT = 'webrtc:answer';
 const WEBRTC_ICE_CANDIDATE_EVENT = 'webrtc:ice-candidate';
+const GAME_TICK_RATE_MS = 50;
 const playerManager = new PlayerManager();
 const proximitySystem = new ProximitySystem();
 const playerPersistenceService = new PlayerPersistenceService();
 const socketPersistenceUserIds = new Map<string, string>();
+const scopeSnapshotSeq = new Map<string, number>();
+const socketLastProcessedInputSeq = new Map<string, number>();
+let gameTickTimer: ReturnType<typeof setInterval> | null = null;
 
 function buildPlayersUpdatePayload(scopeId: string): PlayersUpdatePayload {
   const roomPlayers = playerManager.getPlayersInScope(scopeId);
   const proximity = proximitySystem.updateRoom(scopeId, roomPlayers);
+  const serverTimeMs = Date.now();
+  const snapshotSeq = getNextSnapshotSeq(scopeId);
 
   return {
+    snapshotSeq,
+    serverTimeMs,
     players: roomPlayers.map((player) => ({
       id: player.id,
       x: player.x,
@@ -98,7 +112,9 @@ function buildPlayersUpdatePayload(scopeId: string): PlayersUpdatePayload {
       roomId: player.roomId,
       avatarId: player.avatarId,
       avatarUrl: player.avatarUrl,
-      timestamp: Date.now(),
+      timestamp: serverTimeMs,
+      serverTimeMs,
+      lastProcessedInputSeq: socketLastProcessedInputSeq.get(player.id),
     })),
     proximity,
   };
@@ -227,8 +243,12 @@ export function registerSocketHandlers(io: SocketIOServer, socket: Socket): void
       return;
     }
 
-    const scopeId = buildScopeId(updatedPlayer.worldId, updatedPlayer.roomId);
-    io.to(scopeId).emit(PLAYERS_UPDATE_EVENT, buildPlayersUpdatePayload(scopeId));
+    if (isValidInputSeq(payload.inputSeq)) {
+      const previousInputSeq = socketLastProcessedInputSeq.get(socket.id) ?? 0;
+      if (payload.inputSeq > previousInputSeq) {
+        socketLastProcessedInputSeq.set(socket.id, payload.inputSeq);
+      }
+    }
   });
 
   socket.on(CHAT_EVENT_SEND, (payload: RoomChatSendPayload) => {
@@ -263,6 +283,7 @@ export function registerSocketHandlers(io: SocketIOServer, socket: Socket): void
     const scopeId = playerManager.removePlayer(socket.id);
     console.log(`user disconnected: ${socket.id}`);
     socketPersistenceUserIds.delete(socket.id);
+    socketLastProcessedInputSeq.delete(socket.id);
 
     if (player && userId) {
       void playerPersistenceService.persistPlayerState({
@@ -300,6 +321,21 @@ export function registerSocketHandlers(io: SocketIOServer, socket: Socket): void
       candidate: payload?.candidate,
     });
   });
+}
+
+export function startGameTick(io: SocketIOServer): void {
+  if (gameTickTimer) {
+    return;
+  }
+
+  gameTickTimer = setInterval(() => {
+    const activeScopeIds = playerManager.getAllScopeIds();
+    pruneScopeMetadata(activeScopeIds);
+
+    for (const scopeId of activeScopeIds) {
+      io.to(scopeId).emit(PLAYERS_UPDATE_EVENT, buildPlayersUpdatePayload(scopeId));
+    }
+  }, GAME_TICK_RATE_MS);
 }
 
 function getSocketAuthUser(socket: Socket): AuthenticatedSupabaseUser | null {
@@ -381,6 +417,31 @@ function normalizeRoomId(roomId: string | undefined): string {
 
 function buildScopeId(worldId: string, roomId: string): string {
   return `${worldId}::${roomId}`;
+}
+
+function getNextSnapshotSeq(scopeId: string): number {
+  const previousSnapshotSeq = scopeSnapshotSeq.get(scopeId) ?? 0;
+  const nextSnapshotSeq = previousSnapshotSeq + 1;
+  scopeSnapshotSeq.set(scopeId, nextSnapshotSeq);
+  return nextSnapshotSeq;
+}
+
+function pruneScopeMetadata(activeScopeIds: string[]): void {
+  const activeScopeIdSet = new Set(activeScopeIds);
+  for (const scopeId of scopeSnapshotSeq.keys()) {
+    if (!activeScopeIdSet.has(scopeId)) {
+      scopeSnapshotSeq.delete(scopeId);
+    }
+  }
+}
+
+function isValidInputSeq(inputSeq: number | undefined): inputSeq is number {
+  return (
+    typeof inputSeq === 'number' &&
+    Number.isFinite(inputSeq) &&
+    Number.isInteger(inputSeq) &&
+    inputSeq > 0
+  );
 }
 
 function normalizeChatText(text: string | undefined): string {

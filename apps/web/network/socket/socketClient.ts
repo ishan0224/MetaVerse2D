@@ -22,9 +22,13 @@ type PlayerState = {
   avatarId?: number;
   avatarUrl?: string;
   timestamp: number;
+  serverTimeMs?: number;
+  lastProcessedInputSeq?: number;
 };
 
 type PlayersUpdatePayload = {
+  snapshotSeq?: number;
+  serverTimeMs?: number;
   players: PlayerState[];
   proximity: Record<string, string[]>;
 };
@@ -57,7 +61,13 @@ type ClientToServerEvents = {
     avatarId?: number;
     avatarUrl?: string;
   }) => void;
-  move: (payload: { playerId: string; input: InputState; delta: number }) => void;
+  move: (payload: {
+    playerId: string;
+    input: InputState;
+    delta: number;
+    inputSeq?: number;
+    clientSentAtMs?: number;
+  }) => void;
   'webrtc:offer': (payload: { targetId: string; offer: WebRTCSessionDescription }) => void;
   'webrtc:answer': (payload: { targetId: string; answer: WebRTCSessionDescription }) => void;
   'webrtc:ice-candidate': (payload: { targetId: string; candidate: WebRTCIceCandidate }) => void;
@@ -139,7 +149,7 @@ export function getWorldId(): string | null {
   return worldId;
 }
 
-export function sendInput(inputState: InputState, delta: number): void {
+export function sendInput(inputState: InputState, delta: number, inputSeq: number): void {
   const client = getSocketClient();
   if (!client.connected || !getAuthAccessToken()) {
     return;
@@ -151,6 +161,8 @@ export function sendInput(inputState: InputState, delta: number): void {
     playerId,
     input: inputState,
     delta,
+    inputSeq,
+    clientSentAtMs: Date.now(),
   });
 }
 
