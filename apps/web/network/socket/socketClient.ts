@@ -1,6 +1,13 @@
 import {
   CHAT_EVENT_MESSAGE,
   CHAT_EVENT_SEND,
+  INACTIVITY_ACTIVITY_EVENT,
+  INACTIVITY_KICK_REQUEST_EVENT,
+  INACTIVITY_PHASE_EVENT,
+  type InactivityActivityPayload,
+  type InactivityKickRequestPayload,
+  type InactivityPhase,
+  type InactivityPhasePayload,
   MAX_CHAT_TEXT_LENGTH,
   type RoomChatMessage,
   type RoomChatSendPayload,
@@ -24,6 +31,8 @@ type PlayerState = {
   timestamp: number;
   serverTimeMs?: number;
   lastProcessedInputSeq?: number;
+  inactivityPhase: InactivityPhase;
+  lastMovedAt: number;
 };
 
 type PlayersUpdatePayload = {
@@ -72,6 +81,9 @@ type ClientToServerEvents = {
   'webrtc:answer': (payload: { targetId: string; answer: WebRTCSessionDescription }) => void;
   'webrtc:ice-candidate': (payload: { targetId: string; candidate: WebRTCIceCandidate }) => void;
   [CHAT_EVENT_SEND]: (payload: RoomChatSendPayload) => void;
+  [INACTIVITY_ACTIVITY_EVENT]: (payload: InactivityActivityPayload) => void;
+  [INACTIVITY_PHASE_EVENT]: (payload: InactivityPhasePayload) => void;
+  [INACTIVITY_KICK_REQUEST_EVENT]: (payload: InactivityKickRequestPayload) => void;
 };
 
 type GameSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
@@ -246,6 +258,33 @@ export function listenToRoomChatMessages(
   return () => {
     client.off(CHAT_EVENT_MESSAGE, callback);
   };
+}
+
+export function sendInactivityActivity(payload: InactivityActivityPayload): void {
+  const client = getSocketClient();
+  if (!client.connected || !getAuthAccessToken()) {
+    return;
+  }
+
+  client.emit(INACTIVITY_ACTIVITY_EVENT, payload);
+}
+
+export function sendInactivityPhase(payload: InactivityPhasePayload): void {
+  const client = getSocketClient();
+  if (!client.connected || !getAuthAccessToken()) {
+    return;
+  }
+
+  client.emit(INACTIVITY_PHASE_EVENT, payload);
+}
+
+export function sendInactivityKickRequest(payload: InactivityKickRequestPayload): void {
+  const client = getSocketClient();
+  if (!client.connected || !getAuthAccessToken()) {
+    return;
+  }
+
+  client.emit(INACTIVITY_KICK_REQUEST_EVENT, payload);
 }
 
 function normalizeChatText(value: string): string {

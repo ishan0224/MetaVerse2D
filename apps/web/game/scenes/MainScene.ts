@@ -1,3 +1,4 @@
+import type { InactivityPhase } from '@metaverse2d/shared/types/Inactivity';
 import {
   buildStaticCollisionIndexFromTilemap,
   type StaticCollisionIndex,
@@ -26,6 +27,7 @@ import { MultiplayerSystem } from '@/game/systems/MultiplayerSystem';
 import { ProximityVoiceSystem } from '@/game/systems/ProximityVoiceSystem';
 import { setVoiceUIRemotePlayers } from '@/game/systems/voiceControlStore';
 import { ensureCharacterAnimations } from '@/game/utils/characterAnimations';
+import { getInactivityUiState, resetInactivityTimer } from '@/lib/inactivityUiStore';
 import { getRTCManager } from '@/network/rtc/rtcManager';
 
 const REMOTE_RENDER_DELAY_MS = 100;
@@ -50,6 +52,7 @@ type RenderedPlayerHandle = {
   entity: Player | RemotePlayer;
   position: { x: number; y: number };
   isLocal: boolean;
+  inactivityPhase: InactivityPhase;
 };
 
 export class MainScene extends Phaser.Scene {
@@ -60,8 +63,10 @@ export class MainScene extends Phaser.Scene {
   private multiplayerSystem!: MultiplayerSystem;
   private proximityVoiceSystem!: ProximityVoiceSystem;
   private readonly remotePlayers = new Map<string, RemotePlayer>();
+  private readonly remoteInactivityPhases = new Map<string, InactivityPhase>();
   private predictedLocalPosition: { x: number; y: number } | null = null;
   private lastAuthoritativeLocalSnapshotSeq = Number.NEGATIVE_INFINITY;
+  private localInactivityPhase: InactivityPhase = 0;
   private staticCollisionIndex: StaticCollisionIndex | null = null;
   private mapWorldWidth: number = WORLD_CONFIG.width;
   private mapWorldHeight: number = WORLD_CONFIG.height;
@@ -147,6 +152,7 @@ export class MainScene extends Phaser.Scene {
       }
 
       this.remotePlayers.clear();
+      this.remoteInactivityPhases.clear();
       this.bumpWarningCooldownByPlayerId.clear();
       this.motionSnapshotsByPlayerId.clear();
     });
@@ -155,6 +161,10 @@ export class MainScene extends Phaser.Scene {
   public update(_time: number, delta: number): void {
     const frameDeltaMs = Math.min(Math.max(delta, 0), MAX_FRAME_DELTA_TOTAL_MS);
     const inputState = this.inputHandler.getInputState(frameDeltaMs);
+    const inactivityUiState = getInactivityUiState();
+    if (this.hasMovementIntent(inputState) && inactivityUiState.inactivityPhase !== 2) {
+      resetInactivityTimer('movement');
+    }
     this.multiplayerSystem.pushInput(inputState, frameDeltaMs);
     const nowMs = performance.now();
     this.syncPlayersFromServer(nowMs, inputState, frameDeltaMs);
@@ -186,6 +196,8 @@ export class MainScene extends Phaser.Scene {
       this.player.setColor(localPlayerState.color);
       this.player.setAvatarId(localPlayerState.avatarId);
       this.player.setAvatarUrl(localPlayerState.avatarUrl);
+      this.localInactivityPhase = localPlayerState.inactivityPhase ?? 0;
+      this.player.setInactivityPhase(this.localInactivityPhase);
       this.player.update();
     } else if (this.lastAuthoritativeLocalSnapshotSeq === Number.NEGATIVE_INFINITY) {
       // Keep first-input movement responsive while awaiting initial authoritative snapshot.
@@ -202,6 +214,8 @@ export class MainScene extends Phaser.Scene {
       this.player.update();
     } else {
       this.player.setMovementIntent(false);
+      this.localInactivityPhase = 0;
+      this.player.setInactivityPhase(0);
       this.predictedLocalPosition = null;
       this.lastAuthoritativeLocalSnapshotSeq = Number.NEGATIVE_INFINITY;
     }
@@ -217,6 +231,8 @@ export class MainScene extends Phaser.Scene {
         existingRemotePlayer.setColor(remoteState.color);
         existingRemotePlayer.setAvatarId(remoteState.avatarId);
         existingRemotePlayer.setAvatarUrl(remoteState.avatarUrl);
+        existingRemotePlayer.setInactivityPhase(remoteState.inactivityPhase ?? 0);
+        this.remoteInactivityPhases.set(remoteState.id, remoteState.inactivityPhase ?? 0);
         continue;
       }
 
@@ -231,8 +247,10 @@ export class MainScene extends Phaser.Scene {
         avatarUrl: remoteState.avatarUrl,
         scene: this,
       });
+      remotePlayer.setInactivityPhase(remoteState.inactivityPhase ?? 0);
 
       this.remotePlayers.set(remoteState.id, remotePlayer);
+      this.remoteInactivityPhases.set(remoteState.id, remoteState.inactivityPhase ?? 0);
     }
 
     const renderTime = nowMs - REMOTE_RENDER_DELAY_MS;
@@ -247,6 +265,7 @@ export class MainScene extends Phaser.Scene {
 
       remotePlayer.destroy();
       this.remotePlayers.delete(playerId);
+      this.remoteInactivityPhases.delete(playerId);
       this.motionSnapshotsByPlayerId.delete(playerId);
       this.bumpWarningCooldownByPlayerId.delete(playerId);
     }
@@ -384,6 +403,10 @@ export class MainScene extends Phaser.Scene {
           continue;
         }
 
+        if (firstPlayer.inactivityPhase >= 1 || secondPlayer.inactivityPhase >= 1) {
+          continue;
+        }
+
         const firstPlayerStill = this.isStillPlayer(firstPlayer.id, firstPlayer.isLocal, nowMs, inputState);
         const secondPlayerStill = this.isStillPlayer(secondPlayer.id, secondPlayer.isLocal, nowMs, inputState);
 
@@ -403,6 +426,7 @@ export class MainScene extends Phaser.Scene {
         entity: this.player,
         position: this.player.getPosition(),
         isLocal: true,
+        inactivityPhase: this.localInactivityPhase,
       },
     ];
 
@@ -412,6 +436,7 @@ export class MainScene extends Phaser.Scene {
         entity: remotePlayer,
         position: remotePlayer.getPosition(),
         isLocal: false,
+        inactivityPhase: this.remoteInactivityPhases.get(remotePlayer.getId()) ?? 0,
       });
     }
 

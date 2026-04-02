@@ -1,11 +1,22 @@
 import {
+  ACTIVITY_CHECK_INTERVAL_MS,
   CHAT_EVENT_MESSAGE,
   CHAT_EVENT_SEND,
+  IDLE_TIMEOUT_MS,
+  INACTIVITY_ACTIVITY_EVENT,
+  INACTIVITY_KICK_REQUEST_EVENT,
+  INACTIVITY_PHASE_EVENT,
+  KICK_TIMEOUT_MS,
+  type InactivityActivityPayload,
+  type InactivityKickRequestPayload,
+  type InactivityPhase,
+  type InactivityPhasePayload,
   type InputState,
   MAX_CHAT_TEXT_LENGTH,
   type NearbyPlayersMap,
   type RoomChatMessage,
   type RoomChatSendPayload,
+  WARNING_TIMEOUT_MS,
 } from '@metaverse2d/shared';
 import type { Server as SocketIOServer, Socket } from 'socket.io';
 
@@ -74,6 +85,8 @@ type PlayersUpdatePayload = {
     timestamp: number;
     serverTimeMs: number;
     lastProcessedInputSeq?: number;
+    inactivityPhase: InactivityPhase;
+    lastMovedAt: number;
   }>;
   proximity: NearbyPlayersMap;
 };
@@ -85,12 +98,16 @@ const WEBRTC_OFFER_EVENT = 'webrtc:offer';
 const WEBRTC_ANSWER_EVENT = 'webrtc:answer';
 const WEBRTC_ICE_CANDIDATE_EVENT = 'webrtc:ice-candidate';
 const GAME_TICK_RATE_MS = 50;
+const INACTIVITY_SYSTEM_SENDER_ID = '__system__';
 const playerManager = new PlayerManager();
 const proximitySystem = new ProximitySystem();
 const playerPersistenceService = new PlayerPersistenceService();
 const socketPersistenceUserIds = new Map<string, string>();
 const scopeSnapshotSeq = new Map<string, number>();
 const socketLastProcessedInputSeq = new Map<string, number>();
+const socketInactivityState = new Map<string, { lastMovedAt: number; inactivityPhase: InactivityPhase }>();
+const inactivityKickPendingSocketIds = new Set<string>();
+let lastInactivityEvaluationAtMs = 0;
 let gameTickTimer: ReturnType<typeof setInterval> | null = null;
 
 function buildPlayersUpdatePayload(scopeId: string): PlayersUpdatePayload {
@@ -102,7 +119,9 @@ function buildPlayersUpdatePayload(scopeId: string): PlayersUpdatePayload {
   return {
     snapshotSeq,
     serverTimeMs,
-    players: roomPlayers.map((player) => ({
+    players: roomPlayers.map((player) => {
+      const inactivityState = getOrCreateInactivityState(player.id, serverTimeMs);
+      return {
       id: player.id,
       x: player.x,
       y: player.y,
@@ -115,7 +134,10 @@ function buildPlayersUpdatePayload(scopeId: string): PlayersUpdatePayload {
       timestamp: serverTimeMs,
       serverTimeMs,
       lastProcessedInputSeq: socketLastProcessedInputSeq.get(player.id),
-    })),
+      inactivityPhase: inactivityState.inactivityPhase,
+      lastMovedAt: inactivityState.lastMovedAt,
+      };
+    }),
     proximity,
   };
 }
@@ -128,6 +150,7 @@ export function registerSocketHandlers(io: SocketIOServer, socket: Socket): void
   }
 
   console.log(`user connected: ${socket.id}`);
+  getOrCreateInactivityState(socket.id, Date.now());
 
   const relayWebRTCSignal = (
     fromId: string,
@@ -225,6 +248,7 @@ export function registerSocketHandlers(io: SocketIOServer, socket: Socket): void
       avatarUrl,
     );
 
+    markSocketActive(socket.id, Date.now());
     socket.join(scopeId);
     io.to(scopeId).emit(PLAYERS_UPDATE_EVENT, buildPlayersUpdatePayload(scopeId));
   };
@@ -243,11 +267,63 @@ export function registerSocketHandlers(io: SocketIOServer, socket: Socket): void
       return;
     }
 
+    if (hasMovementIntent(payload.input)) {
+      markSocketActive(socket.id, Date.now());
+    }
+
     if (isValidInputSeq(payload.inputSeq)) {
       const previousInputSeq = socketLastProcessedInputSeq.get(socket.id) ?? 0;
       if (payload.inputSeq > previousInputSeq) {
         socketLastProcessedInputSeq.set(socket.id, payload.inputSeq);
       }
+    }
+  });
+
+  socket.on(INACTIVITY_ACTIVITY_EVENT, (payload: InactivityActivityPayload) => {
+    if (!payload || typeof payload.at !== 'number' || !Number.isFinite(payload.at)) {
+      return;
+    }
+
+    markSocketActive(socket.id, Date.now());
+  });
+
+  socket.on(INACTIVITY_PHASE_EVENT, (payload: InactivityPhasePayload) => {
+    if (!payload || !isValidInactivityPhase(payload.phase) || !isFiniteTimestamp(payload.lastMovedAt)) {
+      return;
+    }
+    if (payload.phase === 3) {
+      return;
+    }
+
+    const nowMs = Date.now();
+    const inactivityState = getOrCreateInactivityState(socket.id, nowMs);
+    inactivityState.lastMovedAt = Math.max(inactivityState.lastMovedAt, Math.min(payload.lastMovedAt, nowMs));
+    const maxAllowedPhase = resolveInactivityPhase(nowMs - inactivityState.lastMovedAt);
+    if (payload.phase > maxAllowedPhase) {
+      return;
+    }
+    inactivityState.inactivityPhase = payload.phase;
+    socketInactivityState.set(socket.id, inactivityState);
+  });
+
+  socket.on(INACTIVITY_KICK_REQUEST_EVENT, (payload: InactivityKickRequestPayload) => {
+    if (!payload) {
+      return;
+    }
+
+    if (payload.reason === 'leave') {
+      kickSocketForInactivity(io, socket.id);
+      return;
+    }
+
+    const inactivityState = socketInactivityState.get(socket.id);
+    if (!inactivityState) {
+      return;
+    }
+
+    const elapsedMs = Date.now() - inactivityState.lastMovedAt;
+    if (elapsedMs >= KICK_TIMEOUT_MS) {
+      kickSocketForInactivity(io, socket.id);
     }
   });
 
@@ -272,18 +348,23 @@ export function registerSocketHandlers(io: SocketIOServer, socket: Socket): void
       avatarId: sender.avatarId,
       text: normalizedText,
       sentAt: Date.now(),
+      kind: 'USER',
     };
 
+    markSocketActive(socket.id, Date.now());
     io.to(scopeId).emit(CHAT_EVENT_MESSAGE, roomChatMessage);
   });
 
   socket.on('disconnect', () => {
+    const removedDueToInactivity = inactivityKickPendingSocketIds.has(socket.id);
+    inactivityKickPendingSocketIds.delete(socket.id);
     const player = playerManager.getPlayer(socket.id);
     const userId = socketPersistenceUserIds.get(socket.id);
     const scopeId = playerManager.removePlayer(socket.id);
     console.log(`user disconnected: ${socket.id}`);
     socketPersistenceUserIds.delete(socket.id);
     socketLastProcessedInputSeq.delete(socket.id);
+    socketInactivityState.delete(socket.id);
 
     if (player && userId) {
       void playerPersistenceService.persistPlayerState({
@@ -297,6 +378,9 @@ export function registerSocketHandlers(io: SocketIOServer, socket: Socket): void
     }
 
     if (scopeId) {
+      if (removedDueToInactivity && player) {
+        io.to(scopeId).emit(CHAT_EVENT_MESSAGE, createInactivitySystemMessage(scopeId, player.name));
+      }
       io.to(scopeId).emit(PLAYERS_UPDATE_EVENT, buildPlayersUpdatePayload(scopeId));
     }
   });
@@ -331,6 +415,7 @@ export function startGameTick(io: SocketIOServer): void {
   gameTickTimer = setInterval(() => {
     const activeScopeIds = playerManager.getAllScopeIds();
     pruneScopeMetadata(activeScopeIds);
+    evaluateInactivityTransitions(io, Date.now());
 
     for (const scopeId of activeScopeIds) {
       io.to(scopeId).emit(PLAYERS_UPDATE_EVENT, buildPlayersUpdatePayload(scopeId));
@@ -442,6 +527,115 @@ function isValidInputSeq(inputSeq: number | undefined): inputSeq is number {
     Number.isInteger(inputSeq) &&
     inputSeq > 0
   );
+}
+
+function getOrCreateInactivityState(
+  socketId: string,
+  nowMs: number,
+): { lastMovedAt: number; inactivityPhase: InactivityPhase } {
+  const existingState = socketInactivityState.get(socketId);
+  if (existingState) {
+    return existingState;
+  }
+
+  const nextState = {
+    lastMovedAt: nowMs,
+    inactivityPhase: 0 as InactivityPhase,
+  };
+  socketInactivityState.set(socketId, nextState);
+  return nextState;
+}
+
+function markSocketActive(socketId: string, nowMs: number): void {
+  const nextState = getOrCreateInactivityState(socketId, nowMs);
+  nextState.lastMovedAt = nowMs;
+  nextState.inactivityPhase = 0;
+  socketInactivityState.set(socketId, nextState);
+}
+
+function evaluateInactivityTransitions(io: SocketIOServer, nowMs: number): void {
+  if (nowMs - lastInactivityEvaluationAtMs < ACTIVITY_CHECK_INTERVAL_MS) {
+    return;
+  }
+  lastInactivityEvaluationAtMs = nowMs;
+
+  for (const [socketId, inactivityState] of socketInactivityState.entries()) {
+    const player = playerManager.getPlayer(socketId);
+    if (!player) {
+      socketInactivityState.delete(socketId);
+      inactivityKickPendingSocketIds.delete(socketId);
+      continue;
+    }
+
+    const elapsedMs = nowMs - inactivityState.lastMovedAt;
+    if (elapsedMs >= KICK_TIMEOUT_MS) {
+      kickSocketForInactivity(io, socketId);
+      continue;
+    }
+
+    const nextPhase = resolveInactivityPhase(elapsedMs);
+    if (nextPhase === inactivityState.inactivityPhase) {
+      continue;
+    }
+
+    inactivityState.inactivityPhase = nextPhase;
+    socketInactivityState.set(socketId, inactivityState);
+  }
+}
+
+function resolveInactivityPhase(elapsedMs: number): InactivityPhase {
+  if (elapsedMs >= WARNING_TIMEOUT_MS) {
+    return 2;
+  }
+
+  if (elapsedMs >= IDLE_TIMEOUT_MS) {
+    return 1;
+  }
+
+  return 0;
+}
+
+function kickSocketForInactivity(io: SocketIOServer, socketId: string): void {
+  if (inactivityKickPendingSocketIds.has(socketId)) {
+    return;
+  }
+
+  const socket = io.sockets.sockets.get(socketId);
+  if (!socket) {
+    return;
+  }
+
+  inactivityKickPendingSocketIds.add(socketId);
+  socket.disconnect(true);
+}
+
+function createInactivitySystemMessage(scopeId: string, username: string): RoomChatMessage {
+  const normalizedUsername = username.trim() || 'A player';
+  return {
+    id: createRoomChatMessageId(INACTIVITY_SYSTEM_SENDER_ID),
+    roomScopeId: scopeId,
+    senderId: INACTIVITY_SYSTEM_SENDER_ID,
+    senderName: 'System',
+    text: `${normalizedUsername} has been removed from the space due to inactivity.`,
+    sentAt: Date.now(),
+    kind: 'SYSTEM',
+  };
+}
+
+function hasMovementIntent(input: InputState): boolean {
+  if (input.up || input.down || input.left || input.right) {
+    return true;
+  }
+
+  return Math.hypot(input.moveX ?? 0, input.moveY ?? 0) > 0.05;
+}
+
+function isValidInactivityPhase(value: InactivityPhase | number | undefined): value is InactivityPhase {
+  return value === 0 || value === 1 || value === 2 || value === 3;
+}
+
+function isFiniteTimestamp(value: number | undefined): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
 }
 
 function normalizeChatText(text: string | undefined): string {
