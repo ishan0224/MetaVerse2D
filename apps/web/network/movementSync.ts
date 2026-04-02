@@ -4,6 +4,15 @@ import { sendInput } from '@/network/socket/socketClient';
 
 const DEFAULT_SYNC_INTERVAL_MS = 75;
 const VECTOR_CHANGE_EPSILON = 0.08;
+const MAX_REPLAY_HISTORY_MS = 400;
+const MAX_REPLAY_HISTORY_ENTRIES = 64;
+
+export type SentInputCommand = {
+  seq: number;
+  input: InputState;
+  deltaMs: number;
+  sentAtMs: number;
+};
 
 export class MovementSyncEmitter {
   private readonly syncIntervalMs: number;
@@ -11,6 +20,8 @@ export class MovementSyncEmitter {
   private lastSentInput: InputState | null = null;
   private accumulatedDeltaMs = 0;
   private lastSentAtMs = 0;
+  private nextInputSeq = 1;
+  private readonly sentInputHistory: SentInputCommand[] = [];
 
   public constructor(syncIntervalMs: number = DEFAULT_SYNC_INTERVAL_MS) {
     this.syncIntervalMs = Math.max(50, syncIntervalMs);
@@ -50,11 +61,47 @@ export class MovementSyncEmitter {
       return;
     }
 
-    sendInput(normalizedInput, this.accumulatedDeltaMs);
+    const inputSeq = this.nextInputSeq;
+    this.nextInputSeq += 1;
+    const sentAtMs = nowMs;
+    sendInput(normalizedInput, this.accumulatedDeltaMs, inputSeq);
+    this.sentInputHistory.push({
+      seq: inputSeq,
+      input: { ...normalizedInput },
+      deltaMs: this.accumulatedDeltaMs,
+      sentAtMs,
+    });
+    this.pruneReplayHistory(sentAtMs);
+
     this.lastSentInput = normalizedInput;
     this.pendingInput = null;
     this.accumulatedDeltaMs = 0;
     this.lastSentAtMs = nowMs;
+  }
+
+  public getPendingReplayCommands(lastProcessedInputSeq: number | null | undefined): SentInputCommand[] {
+    this.pruneReplayHistory(performance.now());
+
+    const acknowledgedSeq = normalizeAcknowledgedSeq(lastProcessedInputSeq);
+    return this.sentInputHistory
+      .filter((command) => command.seq > acknowledgedSeq)
+      .map((command) => ({
+        seq: command.seq,
+        input: { ...command.input },
+        deltaMs: command.deltaMs,
+        sentAtMs: command.sentAtMs,
+      }));
+  }
+
+  public acknowledgeProcessedInput(lastProcessedInputSeq: number | null | undefined): void {
+    const acknowledgedSeq = normalizeAcknowledgedSeq(lastProcessedInputSeq);
+    if (acknowledgedSeq <= 0 || this.sentInputHistory.length === 0) {
+      return;
+    }
+
+    while (this.sentInputHistory.length > 0 && this.sentInputHistory[0].seq <= acknowledgedSeq) {
+      this.sentInputHistory.shift();
+    }
   }
 
   public reset(): void {
@@ -62,6 +109,21 @@ export class MovementSyncEmitter {
     this.lastSentInput = null;
     this.accumulatedDeltaMs = 0;
     this.lastSentAtMs = 0;
+    this.nextInputSeq = 1;
+    this.sentInputHistory.length = 0;
+  }
+
+  private pruneReplayHistory(nowMs: number): void {
+    while (this.sentInputHistory.length > MAX_REPLAY_HISTORY_ENTRIES) {
+      this.sentInputHistory.shift();
+    }
+
+    while (
+      this.sentInputHistory.length > 0 &&
+      nowMs - this.sentInputHistory[0].sentAtMs > MAX_REPLAY_HISTORY_MS
+    ) {
+      this.sentInputHistory.shift();
+    }
   }
 }
 
@@ -114,4 +176,16 @@ function clampAxis(value: number): number {
   }
 
   return Math.max(-1, Math.min(1, value));
+}
+
+function normalizeAcknowledgedSeq(lastProcessedInputSeq: number | null | undefined): number {
+  if (
+    typeof lastProcessedInputSeq !== 'number' ||
+    !Number.isFinite(lastProcessedInputSeq) ||
+    !Number.isInteger(lastProcessedInputSeq)
+  ) {
+    return 0;
+  }
+
+  return Math.max(0, lastProcessedInputSeq);
 }

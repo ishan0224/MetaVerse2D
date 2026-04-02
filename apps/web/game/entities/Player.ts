@@ -40,7 +40,9 @@ type PlayerConfig = {
 
 const DEFAULT_COLOR = 0x3b82f6;
 const DEFAULT_SIZE = 42;
-const MOVEMENT_EPSILON = 0.01;
+const WALK_ENTER_DELTA_THRESHOLD = 0.35;
+const WALK_EXIT_DELTA_THRESHOLD = 0.12;
+const IDLE_SETTLE_DELAY_MS = 120;
 const PLAYER_DEPTH_BASE = 100;
 const BUMP_WARNING_VISIBLE_MS = 1500;
 
@@ -56,6 +58,9 @@ export class Player {
   private activeAvatarUrl: string | null = null;
   private avatarId: AvatarId = DEFAULT_AVATAR_ID;
   private facingDirection: MovementDirection = 'down';
+  private isWalkAnimationActive = false;
+  private hasMovementIntent = false;
+  private idleTransitionTimer: Phaser.Time.TimerEvent | null = null;
   private readonly bumpWarningBubble: BumpWarningBubble;
   private bumpWarningHideTimer: Phaser.Time.TimerEvent | null = null;
   private destroyed = false;
@@ -168,8 +173,19 @@ export class Player {
     this.nameLabel.setText(name);
   }
 
+  public setMovementIntent(hasMovementIntent: boolean): void {
+    this.hasMovementIntent = hasMovementIntent;
+    if (!hasMovementIntent) {
+      this.cancelIdleTransition();
+    }
+  }
+
   public destroy(): void {
     this.destroyed = true;
+    if (this.idleTransitionTimer) {
+      this.idleTransitionTimer.remove(false);
+      this.idleTransitionTimer = null;
+    }
     if (this.bumpWarningHideTimer) {
       this.bumpWarningHideTimer.remove(false);
       this.bumpWarningHideTimer = null;
@@ -216,7 +232,7 @@ export class Player {
     const wasPlaying = this.characterSprite.anims.isPlaying;
     this.characterSprite.setVisible(true);
     this.sprite.setVisible(false);
-    if (wasPlaying) {
+    if (this.isWalkAnimationActive || wasPlaying) {
       this.playWalkAnimation(this.facingDirection);
       return;
     }
@@ -229,22 +245,34 @@ export class Player {
       return;
     }
 
-    const absDeltaX = Math.abs(deltaX);
-    const absDeltaY = Math.abs(deltaY);
-    const isMoving = absDeltaX > MOVEMENT_EPSILON || absDeltaY > MOVEMENT_EPSILON;
-
-    if (!isMoving) {
+    if (!this.hasMovementIntent) {
       this.showIdleFrame();
       return;
     }
 
-    if (absDeltaX > absDeltaY) {
-      this.facingDirection = deltaX >= 0 ? 'right' : 'left';
-    } else {
-      this.facingDirection = deltaY >= 0 ? 'down' : 'up';
+    const movementDeltaMagnitude = Math.hypot(deltaX, deltaY);
+
+    if (this.isWalkAnimationActive) {
+      if (movementDeltaMagnitude > WALK_EXIT_DELTA_THRESHOLD) {
+        this.cancelIdleTransition();
+        this.updateFacingDirection(deltaX, deltaY);
+        this.playWalkAnimation(this.facingDirection);
+        return;
+      }
+
+      this.scheduleIdleTransition();
+      return;
     }
 
-    this.playWalkAnimation(this.facingDirection);
+    if (movementDeltaMagnitude >= WALK_ENTER_DELTA_THRESHOLD) {
+      this.cancelIdleTransition();
+      this.isWalkAnimationActive = true;
+      this.updateFacingDirection(deltaX, deltaY);
+      this.playWalkAnimation(this.facingDirection);
+      return;
+    }
+
+    this.showIdleFrame();
   }
 
   private playWalkAnimation(direction: MovementDirection): void {
@@ -266,11 +294,45 @@ export class Player {
       return;
     }
 
+    this.isWalkAnimationActive = false;
     if (this.characterSprite.anims.isPlaying) {
       this.characterSprite.stop();
     }
 
     this.characterSprite.setFrame(getIdleFrame(this.avatarId, this.facingDirection));
+  }
+
+  private scheduleIdleTransition(): void {
+    if (this.idleTransitionTimer) {
+      return;
+    }
+
+    this.idleTransitionTimer = this.scene.time.delayedCall(IDLE_SETTLE_DELAY_MS, () => {
+      this.idleTransitionTimer = null;
+      if (this.destroyed || !this.isWalkAnimationActive) {
+        return;
+      }
+
+      this.showIdleFrame();
+    });
+  }
+
+  private cancelIdleTransition(): void {
+    if (!this.idleTransitionTimer) {
+      return;
+    }
+
+    this.idleTransitionTimer.remove(false);
+    this.idleTransitionTimer = null;
+  }
+
+  private updateFacingDirection(deltaX: number, deltaY: number): void {
+    if (Math.abs(deltaX) > Math.abs(deltaY)) {
+      this.facingDirection = deltaX >= 0 ? 'right' : 'left';
+      return;
+    }
+
+    this.facingDirection = deltaY >= 0 ? 'down' : 'up';
   }
 
   private async applyAvatarUrl(avatarUrl: string): Promise<void> {

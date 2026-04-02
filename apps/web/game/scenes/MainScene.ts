@@ -32,7 +32,10 @@ const REMOTE_RENDER_DELAY_MS = 100;
 const MAX_FRAME_DELTA_TOTAL_MS = 250;
 const MOVEMENT_STEP_DELTA_MS = 100;
 const LOCAL_IDLE_RECONCILE_LERP = 0.2;
-const LOCAL_RECONCILE_SNAP_DISTANCE = 64;
+const LOCAL_ACTIVE_RECONCILE_LERP = 0.32;
+const LOCAL_IDLE_RECONCILE_DEADBAND_DISTANCE = 2;
+const LOCAL_RECONCILE_EMERGENCY_SNAP_DISTANCE = 192;
+const MAX_REPLAY_COMMANDS_PER_RECONCILE = 32;
 const PLAYER_STATIC_COLLIDER_SIZE = 26;
 const PLAYER_TOUCH_DISTANCE = PLAYER_STATIC_COLLIDER_SIZE + 10;
 const STILL_PLAYER_WINDOW_MS = 300;
@@ -58,7 +61,7 @@ export class MainScene extends Phaser.Scene {
   private proximityVoiceSystem!: ProximityVoiceSystem;
   private readonly remotePlayers = new Map<string, RemotePlayer>();
   private predictedLocalPosition: { x: number; y: number } | null = null;
-  private lastAuthoritativeLocalTimestamp = Number.NEGATIVE_INFINITY;
+  private lastAuthoritativeLocalSnapshotSeq = Number.NEGATIVE_INFINITY;
   private staticCollisionIndex: StaticCollisionIndex | null = null;
   private mapWorldWidth: number = WORLD_CONFIG.width;
   private mapWorldHeight: number = WORLD_CONFIG.height;
@@ -176,6 +179,7 @@ export class MainScene extends Phaser.Scene {
   private syncPlayersFromServer(nowMs: number, inputState: InputState, deltaMs: number): void {
     const localPlayerState = this.multiplayerSystem.getLocalPlayer();
     if (localPlayerState) {
+      this.player.setMovementIntent(this.hasMovementIntent(inputState));
       const localRenderPosition = this.getReconciledLocalPosition(localPlayerState, inputState, deltaMs);
       this.player.setPosition(localRenderPosition.x, localRenderPosition.y);
       this.player.setName(localPlayerState.name);
@@ -183,8 +187,9 @@ export class MainScene extends Phaser.Scene {
       this.player.setAvatarId(localPlayerState.avatarId);
       this.player.setAvatarUrl(localPlayerState.avatarUrl);
       this.player.update();
-    } else if (this.lastAuthoritativeLocalTimestamp === Number.NEGATIVE_INFINITY) {
+    } else if (this.lastAuthoritativeLocalSnapshotSeq === Number.NEGATIVE_INFINITY) {
       // Keep first-input movement responsive while awaiting initial authoritative snapshot.
+      this.player.setMovementIntent(this.hasMovementIntent(inputState));
       if (!this.predictedLocalPosition) {
         this.predictedLocalPosition = this.player.getPosition();
       }
@@ -196,8 +201,9 @@ export class MainScene extends Phaser.Scene {
       this.player.setPosition(this.predictedLocalPosition.x, this.predictedLocalPosition.y);
       this.player.update();
     } else {
+      this.player.setMovementIntent(false);
       this.predictedLocalPosition = null;
-      this.lastAuthoritativeLocalTimestamp = Number.NEGATIVE_INFINITY;
+      this.lastAuthoritativeLocalSnapshotSeq = Number.NEGATIVE_INFINITY;
     }
 
     const remoteStates = this.multiplayerSystem.getRemotePlayers();
@@ -280,7 +286,7 @@ export class MainScene extends Phaser.Scene {
   ): { x: number; y: number } {
     if (!this.predictedLocalPosition) {
       this.predictedLocalPosition = { x: localPlayerState.x, y: localPlayerState.y };
-      this.lastAuthoritativeLocalTimestamp = localPlayerState.timestamp;
+      this.lastAuthoritativeLocalSnapshotSeq = localPlayerState.snapshotSeq;
     } else {
       this.predictedLocalPosition = this.applyLocalMovementSteps(
         this.predictedLocalPosition,
@@ -289,20 +295,49 @@ export class MainScene extends Phaser.Scene {
       );
     }
 
-    // Reconcile only on fresh authoritative snapshots.
-    // Pulling toward a stale snapshot every frame introduces input latency feel.
-    if (localPlayerState.timestamp > this.lastAuthoritativeLocalTimestamp) {
-      this.lastAuthoritativeLocalTimestamp = localPlayerState.timestamp;
-      const errorX = localPlayerState.x - this.predictedLocalPosition.x;
-      const errorY = localPlayerState.y - this.predictedLocalPosition.y;
-      const errorDistance = Math.hypot(errorX, errorY);
+    if (localPlayerState.snapshotSeq > this.lastAuthoritativeLocalSnapshotSeq) {
+      this.lastAuthoritativeLocalSnapshotSeq = localPlayerState.snapshotSeq;
+      let replayedAuthoritativePosition = {
+        x: localPlayerState.x,
+        y: localPlayerState.y,
+      };
 
-      if (errorDistance > LOCAL_RECONCILE_SNAP_DISTANCE) {
-        this.predictedLocalPosition = { x: localPlayerState.x, y: localPlayerState.y };
-      } else if (!this.hasMovementIntent(inputState)) {
+      const pendingReplayCommands = this.multiplayerSystem.getPendingReplayCommands(
+        localPlayerState.lastProcessedInputSeq,
+      );
+      const replayCommandStartIndex =
+        pendingReplayCommands.length > MAX_REPLAY_COMMANDS_PER_RECONCILE
+          ? pendingReplayCommands.length - MAX_REPLAY_COMMANDS_PER_RECONCILE
+          : 0;
+
+      for (let commandIndex = replayCommandStartIndex; commandIndex < pendingReplayCommands.length; commandIndex += 1) {
+        const replayCommand = pendingReplayCommands[commandIndex];
+        replayedAuthoritativePosition = this.applyLocalMovementSteps(
+          replayedAuthoritativePosition,
+          replayCommand.input,
+          replayCommand.deltaMs,
+        );
+      }
+
+      const errorX = replayedAuthoritativePosition.x - this.predictedLocalPosition.x;
+      const errorY = replayedAuthoritativePosition.y - this.predictedLocalPosition.y;
+      const errorDistance = Math.hypot(errorX, errorY);
+      const hasMovementIntent = this.hasMovementIntent(inputState);
+      const reconcileLerp = hasMovementIntent
+        ? LOCAL_ACTIVE_RECONCILE_LERP
+        : LOCAL_IDLE_RECONCILE_LERP;
+
+      if (!hasMovementIntent && errorDistance <= LOCAL_IDLE_RECONCILE_DEADBAND_DISTANCE) {
+        this.predictedLocalPosition = replayedAuthoritativePosition;
+        return { ...this.predictedLocalPosition };
+      }
+
+      if (errorDistance >= LOCAL_RECONCILE_EMERGENCY_SNAP_DISTANCE) {
+        this.predictedLocalPosition = replayedAuthoritativePosition;
+      } else {
         this.predictedLocalPosition = {
-          x: this.predictedLocalPosition.x + errorX * LOCAL_IDLE_RECONCILE_LERP,
-          y: this.predictedLocalPosition.y + errorY * LOCAL_IDLE_RECONCILE_LERP,
+          x: this.predictedLocalPosition.x + errorX * reconcileLerp,
+          y: this.predictedLocalPosition.y + errorY * reconcileLerp,
         };
       }
     }

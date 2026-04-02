@@ -8,7 +8,7 @@ import {
   setRoomId,
   setWorldId,
 } from '@/network';
-import { MovementSyncEmitter } from '@/network/movementSync';
+import { MovementSyncEmitter, type SentInputCommand } from '@/network/movementSync';
 
 type PlayerSnapshot = {
   id: string;
@@ -21,9 +21,14 @@ type PlayerSnapshot = {
   avatarId?: number;
   avatarUrl?: string;
   timestamp: number;
+  snapshotSeq: number;
+  serverTimeMs?: number;
+  lastProcessedInputSeq?: number;
 };
 
 type PlayersUpdatePayload = {
+  snapshotSeq?: number;
+  serverTimeMs?: number;
   players: Array<{
     id: string;
     x: number;
@@ -35,6 +40,8 @@ type PlayersUpdatePayload = {
     avatarId?: number;
     avatarUrl?: string;
     timestamp?: number;
+    serverTimeMs?: number;
+    lastProcessedInputSeq?: number;
   }>;
   proximity: Record<string, string[]>;
 };
@@ -46,6 +53,7 @@ export class MultiplayerSystem {
   private proximityByPlayerId: Record<string, string[]> = {};
   private activeScopeId: string | null = null;
   private readonly movementSyncEmitter = new MovementSyncEmitter();
+  private lastAppliedSnapshotSeq = Number.NEGATIVE_INFINITY;
 
   public start(): void {
     this.unsubscribe = listenToPlayerUpdates((payload) => {
@@ -58,6 +66,11 @@ export class MultiplayerSystem {
       this.unsubscribe();
       this.unsubscribe = null;
     }
+    this.localPlayer = null;
+    this.remotePlayers.clear();
+    this.proximityByPlayerId = {};
+    this.activeScopeId = null;
+    this.lastAppliedSnapshotSeq = Number.NEGATIVE_INFINITY;
     this.movementSyncEmitter.reset();
   }
 
@@ -85,6 +98,10 @@ export class MultiplayerSystem {
     return this.getNearbyPlayerIds(this.localPlayer.id);
   }
 
+  public getPendingReplayCommands(lastProcessedInputSeq: number | null | undefined): SentInputCommand[] {
+    return this.movementSyncEmitter.getPendingReplayCommands(lastProcessedInputSeq);
+  }
+
   private handlePlayersUpdate(payload: PlayersUpdatePayload): void {
     const clientPlayerId = getClientPlayerId();
     const authoritativeLocalPlayer = clientPlayerId
@@ -108,7 +125,14 @@ export class MultiplayerSystem {
       this.remotePlayers.clear();
       this.proximityByPlayerId = {};
       this.activeScopeId = selectedScopeId;
+      this.lastAppliedSnapshotSeq = Number.NEGATIVE_INFINITY;
     }
+
+    const incomingSnapshotSeq = resolveSnapshotSeq(payload.snapshotSeq, this.lastAppliedSnapshotSeq);
+    if (incomingSnapshotSeq <= this.lastAppliedSnapshotSeq) {
+      return;
+    }
+    this.lastAppliedSnapshotSeq = incomingSnapshotSeq;
 
     this.localPlayer = null;
     this.remotePlayers.clear();
@@ -129,11 +153,15 @@ export class MultiplayerSystem {
       const nextSnapshot: PlayerSnapshot = {
         ...player,
         timestamp: snapshotTimestamp,
+        snapshotSeq: incomingSnapshotSeq,
+        serverTimeMs: player.serverTimeMs ?? payload.serverTimeMs,
+        lastProcessedInputSeq: player.lastProcessedInputSeq,
       };
 
       if (clientPlayerId && player.id === clientPlayerId) {
         this.localPlayer = nextSnapshot;
         this.proximityByPlayerId[player.id] = [...(payload.proximity[player.id] ?? [])];
+        this.movementSyncEmitter.acknowledgeProcessedInput(player.lastProcessedInputSeq);
         continue;
       }
 
@@ -141,4 +169,23 @@ export class MultiplayerSystem {
       this.proximityByPlayerId[player.id] = [...(payload.proximity[player.id] ?? [])];
     }
   }
+}
+
+function resolveSnapshotSeq(
+  incomingSnapshotSeq: number | undefined,
+  lastAppliedSnapshotSeq: number,
+): number {
+  if (
+    typeof incomingSnapshotSeq === 'number' &&
+    Number.isFinite(incomingSnapshotSeq) &&
+    Number.isInteger(incomingSnapshotSeq)
+  ) {
+    return incomingSnapshotSeq;
+  }
+
+  if (lastAppliedSnapshotSeq === Number.NEGATIVE_INFINITY) {
+    return 1;
+  }
+
+  return lastAppliedSnapshotSeq + 1;
 }

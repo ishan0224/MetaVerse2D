@@ -111,6 +111,10 @@ export class PlayerManager {
     return this.roomManager.getRoomForPlayer(playerId);
   }
 
+  public getAllScopeIds(): string[] {
+    return this.roomManager.getAllRoomIds();
+  }
+
   private resolveCollisions(scopeId: string): void {
     const roomPlayers = this.getPlayersInScope(scopeId);
     const resolvedPlayers = resolvePlayerCollisions(roomPlayers, {
