@@ -28,6 +28,10 @@ type SpriteSheetMetrics = {
   columns: number;
 };
 
+const TOUCH_CHAT_MESSAGE_VIEWPORT_HEIGHT_CLASS = 'h-56';
+const DESKTOP_CHAT_MESSAGE_VIEWPORT_HEIGHT_CLASS = 'h-52';
+const CHAT_MESSAGE_SCROLL_BOTTOM_THRESHOLD_PX = 24;
+
 let spriteSheetMetricsPromise: Promise<SpriteSheetMetrics> | null = null;
 
 export function RoomChatOverlay({ touchOptimized = false }: RoomChatOverlayProps) {
@@ -38,6 +42,7 @@ export function RoomChatOverlay({ touchOptimized = false }: RoomChatOverlayProps
   const [spriteSheetMetrics, setSpriteSheetMetrics] = useState<SpriteSheetMetrics | null>(null);
   const messageListRef = useRef<HTMLDivElement | null>(null);
   const messageInputRef = useRef<HTMLInputElement | null>(null);
+  const shouldStickMessagesToBottomRef = useRef(true);
   const localPlayerId = getClientPlayerId();
 
   const messageRows = useMemo(
@@ -69,6 +74,15 @@ export function RoomChatOverlay({ touchOptimized = false }: RoomChatOverlayProps
 
   useEffect(() => {
     if (!isOpen || !messageListRef.current) {
+      return;
+    }
+
+    shouldStickMessagesToBottomRef.current = true;
+    messageListRef.current.scrollTop = messageListRef.current.scrollHeight;
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || !messageListRef.current || !shouldStickMessagesToBottomRef.current) {
       return;
     }
 
@@ -128,6 +142,10 @@ export function RoomChatOverlay({ touchOptimized = false }: RoomChatOverlayProps
     ? 'right-16 top-[-8rem]'
     : 'right-12 sm:right-14 top-[-8rem]';
   const panelWidthClass = touchOptimized ? 'w-[min(86vw,18rem)]' : 'w-[min(18rem,calc(100vw-1.5rem))]';
+  const messageViewportHeightClass = touchOptimized
+    ? TOUCH_CHAT_MESSAGE_VIEWPORT_HEIGHT_CLASS
+    : DESKTOP_CHAT_MESSAGE_VIEWPORT_HEIGHT_CLASS;
+  const shellZIndexClass = touchOptimized && isOpen ? 'z-40' : 'z-30';
 
   const canSend = draftMessage.trim().length > 0;
 
@@ -145,7 +163,7 @@ export function RoomChatOverlay({ touchOptimized = false }: RoomChatOverlayProps
   };
 
   return (
-    <div className={`pointer-events-none absolute z-30 ${shellPositionClass}`} style={safeAreaStyle}>
+    <div className={`pointer-events-none absolute ${shellZIndexClass} ${shellPositionClass}`} style={safeAreaStyle}>
       {isOpen ? (
         <div
           className={`pointer-events-auto absolute ${panelPositionClass} ${panelWidthClass} overflow-hidden rounded-xl border border-white/15 bg-black/70 shadow-lg backdrop-blur`}
@@ -155,7 +173,14 @@ export function RoomChatOverlay({ touchOptimized = false }: RoomChatOverlayProps
           </div>
           <div
             ref={messageListRef}
-            className="max-h-[24rem] min-h-[14rem] overflow-y-auto px-3 py-2 text-sm text-zinc-100"
+            className={`${messageViewportHeightClass} overflow-y-auto px-3 py-2 text-sm text-zinc-100`}
+            onScroll={(event) => {
+              const element = event.currentTarget;
+              const distanceFromBottom =
+                element.scrollHeight - element.scrollTop - element.clientHeight;
+              shouldStickMessagesToBottomRef.current =
+                distanceFromBottom <= CHAT_MESSAGE_SCROLL_BOTTOM_THRESHOLD_PX;
+            }}
           >
             {messageRows.length === 0 ? (
               <p className="text-xs text-zinc-400">No messages yet.</p>
