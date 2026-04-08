@@ -1,3 +1,5 @@
+/** @module apps/server/src/index.ts */
+
 import { loadServerEnvironment, resolveServerRuntimeEnv } from './core/loadEnvironment';
 import { createHttpServer } from './core/server';
 import { closeDatabaseConnection } from './db/client';

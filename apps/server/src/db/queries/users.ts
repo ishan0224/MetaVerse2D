@@ -1,3 +1,5 @@
+/** @module apps/server/src/db/queries/users.ts */
+
 import { and, eq, isNull } from 'drizzle-orm';
 
 import type { DbClient } from '../client';

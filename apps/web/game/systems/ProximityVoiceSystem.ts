@@ -1,5 +1,5 @@
 import { VOICE_CONFIG } from '@/game/config/voiceConfig';
-import { getVoiceControlState, type VoiceMode } from '@/game/systems/voiceControlStore';
+import { getVoiceControlState, type VoiceMode } from '@/lib/voiceControlStore';
 
 type ProximityVoiceAdapter = {
   createConnection: (targetId: string) => Promise<void>;

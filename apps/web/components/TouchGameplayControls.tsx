@@ -9,7 +9,7 @@ import {
   setUIPushToTalkPressed,
   subscribeToVoiceControlState,
   type VoiceMode,
-} from '@/game/systems/voiceControlStore';
+} from '@/lib/voiceControlStore';
 import { resetMovementInput } from '@/store/useInputStore';
 
 export function TouchGameplayControls() {

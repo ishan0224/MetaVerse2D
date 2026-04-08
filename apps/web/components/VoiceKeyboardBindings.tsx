@@ -6,7 +6,7 @@ import {
   cycleVoiceMode,
   setKeyboardPushToTalkPressed,
   setUIPushToTalkPressed,
-} from '@/game/systems/voiceControlStore';
+} from '@/lib/voiceControlStore';
 
 export function VoiceKeyboardBindings() {
   useEffect(() => {

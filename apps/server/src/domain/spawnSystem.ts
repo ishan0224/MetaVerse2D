@@ -1,3 +1,5 @@
+/** @module apps/server/src/domain/spawnSystem.ts */
+
 import type { Player } from '@metaverse2d/shared';
 
 import { WORLD_BOUNDS } from './worldConfig';

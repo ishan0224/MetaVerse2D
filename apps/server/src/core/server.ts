@@ -1,3 +1,5 @@
+/** @module apps/server/src/core/server.ts */
+
 import { createServer } from 'node:http';
 
 import express from 'express';

@@ -1,3 +1,5 @@
+/** @module apps/web/network/movementSync.ts */
+
 import type { InputState } from '@metaverse2d/shared/types/InputState';
 
 import { sendInput } from '@/network/socket/socketClient';

@@ -1,3 +1,5 @@
+/** @module apps/server/src/scripts/dbCheck.ts */
+
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 

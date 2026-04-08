@@ -24,8 +24,8 @@ import { InputHandler } from '@/game/systems/InputHandler';
 import { MovementSystem } from '@/game/systems/MovementSystem';
 import { MultiplayerSystem } from '@/game/systems/MultiplayerSystem';
 import { ProximityVoiceSystem } from '@/game/systems/ProximityVoiceSystem';
-import { setVoiceUIRemotePlayers } from '@/game/systems/voiceControlStore';
 import { ensureCharacterAnimations } from '@/game/utils/characterAnimations';
+import { setVoiceUIRemotePlayers } from '@/lib/voiceControlStore';
 import { getRTCManager } from '@/network/rtc/rtcManager';
 
 const REMOTE_RENDER_DELAY_MS = 100;

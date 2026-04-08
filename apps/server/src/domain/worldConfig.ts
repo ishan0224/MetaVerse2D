@@ -1,3 +1,5 @@
+/** @module apps/server/src/domain/worldConfig.ts */
+
 export const WORLD_BOUNDS = {
   minX: 0,
   maxX: 2400,

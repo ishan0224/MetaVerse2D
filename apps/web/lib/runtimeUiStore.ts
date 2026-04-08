@@ -1,3 +1,5 @@
+import { createObservableStore } from '@/lib/createObservableStore';
+
 export type JoinUiPhase =
   | 'CONNECTING'
   | 'JOINING_ROOM'
@@ -65,49 +67,44 @@ const DEFAULT_STATE: RuntimeUiState = {
   },
 };
 
-let state: RuntimeUiState = { ...DEFAULT_STATE };
-const listeners = new Set<() => void>();
+const store = createObservableStore(DEFAULT_STATE);
 
 export function subscribeToRuntimeUiState(listener: () => void): () => void {
-  listeners.add(listener);
-  return () => {
-    listeners.delete(listener);
-  };
+  return store.subscribe(listener);
 }
 
 export function getRuntimeUiState(): RuntimeUiState {
-  return state;
+  return store.getState();
 }
 
 export function resetRuntimeUiState(): void {
-  state = { ...DEFAULT_STATE };
-  emit();
+  store.reset();
 }
 
 export function setRuntimeIdentity(playerName: string, roomId: string): void {
+  const state = store.getState();
   if (state.playerName === playerName && state.roomId === roomId) {
     return;
   }
 
-  state = {
-    ...state,
+  store.setState((previous) => ({
+    ...previous,
     playerName,
     roomId,
-  };
-  emit();
+  }));
 }
 
 export function setRoomPopulation(roomPopulation: number): void {
+  const state = store.getState();
   const nextPopulation = Math.max(0, roomPopulation);
   if (state.roomPopulation === nextPopulation) {
     return;
   }
 
-  state = {
-    ...state,
+  store.setState((previous) => ({
+    ...previous,
     roomPopulation: nextPopulation,
-  };
-  emit();
+  }));
 }
 
 export function setRuntimeAvatar(
@@ -115,6 +112,7 @@ export function setRuntimeAvatar(
   playerColor: number,
   avatarId: number | null,
 ): void {
+  const state = store.getState();
   const normalizedAvatarId =
     typeof avatarId === 'number' && Number.isFinite(avatarId) ? Math.round(avatarId) : null;
   if (
@@ -125,61 +123,53 @@ export function setRuntimeAvatar(
     return;
   }
 
-  state = {
-    ...state,
+  store.setState((previous) => ({
+    ...previous,
     avatarUrl,
     avatarId: normalizedAvatarId,
     playerColor,
-  };
-  emit();
+  }));
 }
 
 export function setJoinUiPhase(joinUiPhase: JoinUiPhase): void {
+  const state = store.getState();
   if (state.joinUiPhase === joinUiPhase) {
     return;
   }
 
-  state = {
-    ...state,
+  store.setState((previous) => ({
+    ...previous,
     joinUiPhase,
-  };
-  emit();
+  }));
 }
 
 export function setSocketUiStatus(socketStatus: SocketUiStatus): void {
+  const state = store.getState();
   if (state.socketStatus === socketStatus) {
     return;
   }
 
-  state = {
-    ...state,
+  store.setState((previous) => ({
+    ...previous,
     socketStatus,
-  };
-  emit();
+  }));
 }
 
 export function setMicPermissionStatus(micPermissionStatus: MicPermissionStatus): void {
+  const state = store.getState();
   if (state.micPermissionStatus === micPermissionStatus) {
     return;
   }
 
-  state = {
-    ...state,
+  store.setState((previous) => ({
+    ...previous,
     micPermissionStatus,
-  };
-  emit();
+  }));
 }
 
 export function setMinimapSnapshot(minimap: MinimapSnapshot): void {
-  state = {
-    ...state,
+  store.setState((previous) => ({
+    ...previous,
     minimap,
-  };
-  emit();
-}
-
-function emit(): void {
-  for (const listener of listeners) {
-    listener();
-  }
+  }));
 }

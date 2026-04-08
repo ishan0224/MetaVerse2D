@@ -2,7 +2,8 @@
 
 import { useSyncExternalStore } from 'react';
 
-import { getVoiceControlState, subscribeToVoiceControlState } from '@/game/systems/voiceControlStore';
+import { HudCircle } from '@/components/ui';
+import { getVoiceControlState, subscribeToVoiceControlState } from '@/lib/voiceControlStore';
 
 type MicModeCircleProps = {
   placement?: 'bottom-right' | 'top-right-below';
@@ -31,16 +32,17 @@ export function MicModeCircle({
       }
     : undefined;
   const circleElement = (
-    <div
-      className={`flex items-center justify-center rounded-full border border-white/20 bg-black/60 text-zinc-100 shadow-md backdrop-blur transition-transform duration-150 ease-out ${touchOptimized ? 'h-14 w-14' : 'h-11 w-11 sm:h-12 sm:w-12'} ${
+    <HudCircle
+      size={touchOptimized ? 'lg' : 'sm'}
+      ariaLabel={getAriaLabel(voiceState.mode)}
+      className={`transition-transform duration-150 ease-out ${
         pushToTalkActive ? '-translate-y-1.5' : 'translate-y-0'
       }`}
-      aria-label={getAriaLabel(voiceState.mode)}
     >
       {voiceState.mode === 'MUTED' ? <MutedMicIcon /> : null}
       {voiceState.mode === 'ALWAYS_ON' ? <MicIcon /> : null}
       {voiceState.mode === 'PUSH_TO_TALK' ? <WalkieTalkieIcon /> : null}
-    </div>
+    </HudCircle>
   );
 
   if (placement === 'top-right-below') {

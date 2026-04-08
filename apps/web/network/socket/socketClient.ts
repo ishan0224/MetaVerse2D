@@ -1,3 +1,5 @@
+/** @module apps/web/network/socket/socketClient.ts */
+
 import {
   CHAT_EVENT_MESSAGE,
   CHAT_EVENT_SEND,

@@ -1,3 +1,5 @@
+/** @module apps/server/src/domain/proximitySystem.ts */
+
 import { computeNearbyPlayers, type NearbyPlayersMap, type Player } from '@metaverse2d/shared';
 
 const DEFAULT_PROXIMITY_THRESHOLD = 220;

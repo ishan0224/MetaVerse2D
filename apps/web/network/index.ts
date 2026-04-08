@@ -1,3 +1,5 @@
+/** @module apps/web/network/index.ts */
+
 export {
   getClientPlayerId,
   getRoomId,

@@ -1,3 +1,5 @@
+/** @module apps/web/network/auth/supabaseClient.ts */
+
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 import { webEnv } from '@/config/env';

@@ -1,3 +1,5 @@
+/** @module apps/server/src/domain/playerManager.ts */
+
 import type { InputState, Player } from '@metaverse2d/shared';
 import {
   getNextPosition,

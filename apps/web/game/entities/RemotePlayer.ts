@@ -9,7 +9,12 @@ import {
   type MovementDirection,
   normalizeAvatarId,
 } from '@/game/config/characterSpriteConfig';
-import { ensureAvatarTexture, normalizeAvatarUrl } from '@/game/utils/avatarTexture';
+import {
+  ensureAvatarTexture,
+  normalizeAvatarUrl,
+  releaseAvatarTexture,
+  retainAvatarTexture,
+} from '@/game/utils/avatarTexture';
 import {
   type BumpWarningBubble,
   createBumpWarningBubble,
@@ -60,6 +65,7 @@ export class RemotePlayer {
   private position: Position;
   private readonly positionBuffer: TimedPosition[] = [];
   private activeAvatarUrl: string | null = null;
+  private activeAvatarTextureKey: string | null = null;
   private avatarId: AvatarId = DEFAULT_AVATAR_ID;
   private facingDirection: MovementDirection = 'down';
   private isWalkAnimationActive = false;
@@ -353,6 +359,12 @@ export class RemotePlayer {
       return;
     }
 
+    if (this.activeAvatarTextureKey !== textureKey) {
+      retainAvatarTexture(textureKey);
+      releaseAvatarTexture(this.scene, this.activeAvatarTextureKey);
+      this.activeAvatarTextureKey = textureKey;
+    }
+
     if (this.avatarSprite) {
       this.avatarSprite.setTexture(textureKey);
     } else {
@@ -367,12 +379,13 @@ export class RemotePlayer {
   }
 
   private clearAvatarSprite(): void {
-    if (!this.avatarSprite) {
-      return;
+    if (this.avatarSprite) {
+      this.avatarSprite.destroy();
+      this.avatarSprite = null;
     }
 
-    this.avatarSprite.destroy();
-    this.avatarSprite = null;
+    releaseAvatarTexture(this.scene, this.activeAvatarTextureKey);
+    this.activeAvatarTextureKey = null;
   }
 
   private syncDepth(): void {

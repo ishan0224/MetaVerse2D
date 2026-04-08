@@ -1,3 +1,5 @@
+/** @module apps/server/src/db/connectionString.ts */
+
 export interface ResolvedDatabaseUrl {
   value: string | null;
   wasAdjustedForLibpqCompatibility: boolean;

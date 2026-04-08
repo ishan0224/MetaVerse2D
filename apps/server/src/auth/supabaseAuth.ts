@@ -1,3 +1,5 @@
+/** @module apps/server/src/auth/supabaseAuth.ts */
+
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 export type AuthenticatedSupabaseUser = {

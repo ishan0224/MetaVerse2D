@@ -1,3 +1,5 @@
+/** @module apps/web/network/auth/userProfileClient.ts */
+
 import { webEnv } from '@/config/env';
 
 type UpsertUserProfileResult =

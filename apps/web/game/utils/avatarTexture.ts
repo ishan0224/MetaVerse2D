@@ -1,6 +1,7 @@
 import * as Phaser from 'phaser';
 
 const pendingTextureLoadsByKey = new Map<string, Promise<boolean>>();
+const avatarTextureRefCountsByKey = new Map<string, number>();
 
 export function normalizeAvatarUrl(avatarUrl: string | null | undefined): string | null {
   const trimmed = avatarUrl?.trim();
@@ -45,6 +46,28 @@ export async function ensureAvatarTexture(
   }
 
   return textureKey;
+}
+
+export function retainAvatarTexture(textureKey: string): void {
+  const nextCount = (avatarTextureRefCountsByKey.get(textureKey) ?? 0) + 1;
+  avatarTextureRefCountsByKey.set(textureKey, nextCount);
+}
+
+export function releaseAvatarTexture(scene: Phaser.Scene, textureKey: string | null): void {
+  if (!textureKey) {
+    return;
+  }
+
+  const currentCount = avatarTextureRefCountsByKey.get(textureKey) ?? 0;
+  if (currentCount <= 1) {
+    avatarTextureRefCountsByKey.delete(textureKey);
+    if (scene.textures.exists(textureKey)) {
+      scene.textures.remove(textureKey);
+    }
+    return;
+  }
+
+  avatarTextureRefCountsByKey.set(textureKey, currentCount - 1);
 }
 
 function trackPendingTextureLoad(textureKey: string, loadStatus: Promise<boolean>): Promise<boolean> {

@@ -9,30 +9,24 @@ import { type CSSProperties, useEffect, useMemo, useRef, useState, useSyncExtern
 
 import {
   AVATAR_WALK_FRAMES,
-  CHARACTER_SPRITE_FRAME_HEIGHT,
-  CHARACTER_SPRITE_FRAME_WIDTH,
-  CHARACTER_SPRITE_SHEET_PATH,
   normalizeAvatarId,
 } from '@/game/config/characterSpriteConfig';
 import { getRoomChatState, subscribeToRoomChatState } from '@/lib/chatUiStore';
 import { getRuntimeUiState, subscribeToRuntimeUiState } from '@/lib/runtimeUiStore';
+import {
+  buildSpriteFrameStyle,
+  loadSpriteSheetMetrics,
+  type SpriteSheetMetrics,
+} from '@/lib/spriteUtils';
 import { getClientPlayerId, sendRoomChatMessage } from '@/network';
 
 type RoomChatOverlayProps = {
   touchOptimized?: boolean;
 };
 
-type SpriteSheetMetrics = {
-  width: number;
-  height: number;
-  columns: number;
-};
-
 const TOUCH_CHAT_MESSAGE_VIEWPORT_HEIGHT_CLASS = 'h-56';
 const DESKTOP_CHAT_MESSAGE_VIEWPORT_HEIGHT_CLASS = 'h-52';
 const CHAT_MESSAGE_SCROLL_BOTTOM_THRESHOLD_PX = 24;
-
-let spriteSheetMetricsPromise: Promise<SpriteSheetMetrics> | null = null;
 
 export function RoomChatOverlay({ touchOptimized = false }: RoomChatOverlayProps) {
   const { messages } = useSyncExternalStore(subscribeToRoomChatState, getRoomChatState, getRoomChatState);
@@ -52,7 +46,7 @@ export function RoomChatOverlay({ touchOptimized = false }: RoomChatOverlayProps
 
   useEffect(() => {
     let cancelled = false;
-    void getSpriteSheetMetrics()
+    void loadSpriteSheetMetrics()
       .then((metrics) => {
         if (cancelled) {
           return;
@@ -316,48 +310,16 @@ function isTypingTarget(target: EventTarget | null): boolean {
   return tagName === 'input' || tagName === 'textarea' || tagName === 'select' || target.isContentEditable;
 }
 
-function getSpriteSheetMetrics(): Promise<SpriteSheetMetrics> {
-  if (!spriteSheetMetricsPromise) {
-    spriteSheetMetricsPromise = new Promise<SpriteSheetMetrics>((resolve, reject) => {
-      const image = new Image();
-      image.onload = () => {
-        const columns = Math.max(1, Math.floor(image.naturalWidth / CHARACTER_SPRITE_FRAME_WIDTH));
-        resolve({
-          width: image.naturalWidth,
-          height: image.naturalHeight,
-          columns,
-        });
-      };
-      image.onerror = () => {
-        reject(new Error(`Failed to load character sprite sheet: ${CHARACTER_SPRITE_SHEET_PATH}`));
-      };
-      image.src = CHARACTER_SPRITE_SHEET_PATH;
-    });
-  }
-
-  return spriteSheetMetricsPromise;
-}
-
 function buildAvatarSpriteStyle(
   avatarId: number | undefined,
   spriteSheetMetrics: SpriteSheetMetrics,
 ): CSSProperties {
   const normalizedAvatarId = normalizeAvatarId(avatarId);
   const frameIndex = AVATAR_WALK_FRAMES[normalizedAvatarId].down.start;
-  const column = frameIndex % spriteSheetMetrics.columns;
-  const row = Math.floor(frameIndex / spriteSheetMetrics.columns);
-  const frameWidth = CHARACTER_SPRITE_FRAME_WIDTH;
-  const frameHeight = CHARACTER_SPRITE_FRAME_HEIGHT;
   const spriteScale = 7 / 4;
-  const offsetX = column * frameWidth;
-  const offsetY = row * frameHeight;
 
   return {
-    backgroundImage: `url(${CHARACTER_SPRITE_SHEET_PATH})`,
-    backgroundRepeat: 'no-repeat',
-    backgroundSize: `${spriteSheetMetrics.width * spriteScale}px ${spriteSheetMetrics.height * spriteScale}px`,
-    backgroundPosition: `-${offsetX * spriteScale}px -${offsetY * spriteScale}px`,
-    imageRendering: 'pixelated',
+    ...buildSpriteFrameStyle(frameIndex, spriteSheetMetrics, spriteScale),
     width: '100%',
     height: '100%',
   };

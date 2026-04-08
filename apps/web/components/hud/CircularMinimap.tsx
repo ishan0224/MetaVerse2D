@@ -3,15 +3,16 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
 
 import { ENABLE_TEST_MINIMAP } from '@/config/features';
+import { numberToHexColor } from '@/lib/colorUtils';
 import { getRuntimeUiState, subscribeToRuntimeUiState } from '@/lib/runtimeUiStore';
 
-import { getRasterizedMinimapMap } from './minimapTilemapRasterizer';
+import { getRasterizedMinimapMap } from '../minimapTilemapRasterizer';
 import {
   createCircularMinimapLayout,
   getContentOffsetForFocus,
   toMinimapContentPoint,
   type WorldPoint,
-} from './minimapTransform';
+} from '../minimapTransform';
 
 const MINIMAP_VIEWPORT_SIZE = 150;
 const MINIMAP_WORLD_TO_VIEW_SCALE = 0.12;
@@ -132,9 +133,4 @@ export function CircularMinimap() {
       </div>
     </div>
   );
-}
-
-function numberToHexColor(color: number): string {
-  const clamped = Math.max(0, Math.min(0xffffff, color >>> 0));
-  return `#${clamped.toString(16).padStart(6, '0')}`;
 }

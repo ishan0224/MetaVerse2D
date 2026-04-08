@@ -1,3 +1,5 @@
+/** @module apps/web/network/auth/emailAvailabilityClient.ts */
+
 import { normalizeEmail, validateEmailAddress } from '@metaverse2d/shared';
 
 type EmailAvailabilityResult =

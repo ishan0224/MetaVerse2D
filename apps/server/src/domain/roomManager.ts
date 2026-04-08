@@ -1,3 +1,5 @@
+/** @module apps/server/src/domain/roomManager.ts */
+
 import type { Player } from '@metaverse2d/shared';
 
 export class RoomManager {

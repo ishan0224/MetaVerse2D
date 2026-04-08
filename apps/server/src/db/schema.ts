@@ -1,3 +1,5 @@
+/** @module apps/server/src/db/schema.ts */
+
 import {
   doublePrecision,
   index,

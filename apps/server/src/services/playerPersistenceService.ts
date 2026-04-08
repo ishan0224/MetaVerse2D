@@ -1,3 +1,5 @@
+/** @module apps/server/src/services/playerPersistenceService.ts */
+
 import { validateUsername } from '@metaverse2d/shared';
 
 import { getDbClient } from '../db/client';

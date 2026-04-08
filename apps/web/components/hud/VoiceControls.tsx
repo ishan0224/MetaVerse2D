@@ -2,6 +2,7 @@
 
 import { useSyncExternalStore } from 'react';
 
+import { Button } from '@/components/ui';
 import {
   getVoiceControlState,
   setRemotePlayerMuted,
@@ -9,7 +10,7 @@ import {
   setVoiceMode,
   subscribeToVoiceControlState,
   type VoiceMode,
-} from '@/game/systems/voiceControlStore';
+} from '@/lib/voiceControlStore';
 
 const VOICE_MODES: VoiceMode[] = ['MUTED', 'PUSH_TO_TALK', 'ALWAYS_ON'];
 
@@ -33,27 +34,27 @@ export function VoiceControls() {
         {VOICE_MODES.map((mode) => {
           const selected = state.mode === mode;
           return (
-            <button
+            <Button
               key={mode}
-              type="button"
               onClick={() => {
                 setVoiceMode(mode);
               }}
-              className={`rounded px-2 py-1 ${
+              variant={selected ? 'active' : 'secondary'}
+              size="sm"
+              className={`rounded border-transparent px-2 py-1 ${
                 selected
-                  ? 'bg-emerald-500 text-black'
+                  ? 'bg-emerald-500 text-black hover:bg-emerald-500'
                   : 'bg-zinc-700 text-zinc-100 hover:bg-zinc-600'
               }`}
             >
               {formatMode(mode)}
-            </button>
+            </Button>
           );
         })}
       </div>
 
       <div className="pointer-events-auto mb-3">
-        <button
-          type="button"
+        <Button
           onMouseDown={() => {
             setUIPushToTalkPressed(true);
           }}
@@ -72,12 +73,13 @@ export function VoiceControls() {
           onTouchCancel={() => {
             setUIPushToTalkPressed(false);
           }}
-          className={`w-full rounded px-3 py-2 text-left ${
-            pushToTalkActive ? 'bg-emerald-500 text-black' : 'bg-zinc-700 hover:bg-zinc-600'
+          variant={pushToTalkActive ? 'active' : 'secondary'}
+          className={`w-full border-transparent px-3 py-2 text-left ${
+            pushToTalkActive ? 'bg-emerald-500 text-black hover:bg-emerald-500' : 'bg-zinc-700 hover:bg-zinc-600'
           }`}
         >
           Hold To Talk (UI) or press Space
-        </button>
+        </Button>
       </div>
 
       <div className="space-y-1">
@@ -93,17 +95,18 @@ export function VoiceControls() {
               className="pointer-events-auto flex items-center justify-between gap-2"
             >
               <span className="truncate">{player.name || player.id}</span>
-              <button
-                type="button"
+              <Button
                 onClick={() => {
                   setRemotePlayerMuted(player.id, !muted);
                 }}
-                className={`rounded px-2 py-1 ${
-                  muted ? 'bg-rose-500 text-black' : 'bg-zinc-700 hover:bg-zinc-600'
+                variant="secondary"
+                size="sm"
+                className={`rounded border-transparent px-2 py-1 ${
+                  muted ? 'bg-rose-500 text-black hover:bg-rose-500' : 'bg-zinc-700 hover:bg-zinc-600'
                 }`}
               >
                 {muted ? 'Unmute' : 'Mute'}
-              </button>
+              </Button>
             </div>
           );
         })}

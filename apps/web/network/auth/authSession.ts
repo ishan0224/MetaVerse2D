@@ -1,5 +1,8 @@
+/** @module apps/web/network/auth/authSession.ts */
+
 import type { Session, User } from '@supabase/supabase-js';
 
+import { createObservableStore } from '@/lib/createObservableStore';
 import { getSupabaseBrowserClient } from '@/network/auth/supabaseClient';
 
 type AuthSessionState = {
@@ -20,8 +23,7 @@ const DEFAULT_STATE: AuthSessionState = {
   user: null,
 };
 
-let state: AuthSessionState = { ...DEFAULT_STATE };
-const listeners = new Set<() => void>();
+const store = createObservableStore(DEFAULT_STATE);
 let hasAuthStateSubscription = false;
 
 export async function initializeAuthSession(): Promise<void> {
@@ -32,12 +34,11 @@ export async function initializeAuthSession(): Promise<void> {
   const client = getSupabaseBrowserClient();
   const { data, error } = await client.auth.getSession();
   if (error) {
-    state = {
+    store.setState(() => ({
       isInitialized: true,
       accessToken: null,
       user: null,
-    };
-    emit();
+    }));
   } else {
     applySession(data.session);
   }
@@ -49,18 +50,15 @@ export async function initializeAuthSession(): Promise<void> {
 }
 
 export function subscribeToAuthSession(listener: () => void): () => void {
-  listeners.add(listener);
-  return () => {
-    listeners.delete(listener);
-  };
+  return store.subscribe(listener);
 }
 
 export function getAuthSessionState(): AuthSessionState {
-  return state;
+  return store.getState();
 }
 
 export function getAuthAccessToken(): string | null {
-  return state.accessToken;
+  return store.getState().accessToken;
 }
 
 export async function signUpWithEmailPassword(email: string, password: string): Promise<AuthResult> {
@@ -104,16 +102,9 @@ export async function signOutFromAuth(): Promise<void> {
 }
 
 function applySession(session: Session | null): void {
-  state = {
+  store.setState(() => ({
     isInitialized: true,
     accessToken: session?.access_token ?? null,
     user: session?.user ?? null,
-  };
-  emit();
-}
-
-function emit(): void {
-  for (const listener of listeners) {
-    listener();
-  }
+  }));
 }

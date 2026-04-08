@@ -1,3 +1,5 @@
+import { createObservableStore } from '@/lib/createObservableStore';
+
 export type VoiceMode = 'MUTED' | 'PUSH_TO_TALK' | 'ALWAYS_ON';
 
 export type VoiceUIRemotePlayer = {
@@ -21,34 +23,30 @@ const DEFAULT_STATE: VoiceControlState = {
   remotePlayers: [],
 };
 
-let state: VoiceControlState = { ...DEFAULT_STATE };
-const listeners = new Set<() => void>();
+const store = createObservableStore(DEFAULT_STATE);
 
 export function subscribeToVoiceControlState(listener: () => void): () => void {
-  listeners.add(listener);
-
-  return () => {
-    listeners.delete(listener);
-  };
+  return store.subscribe(listener);
 }
 
 export function getVoiceControlState(): VoiceControlState {
-  return state;
+  return store.getState();
 }
 
 export function setVoiceMode(mode: VoiceMode): void {
+  const state = store.getState();
   if (state.mode === mode) {
     return;
   }
 
-  state = {
-    ...state,
+  store.setState((previous) => ({
+    ...previous,
     mode,
-  };
-  emit();
+  }));
 }
 
 export function cycleVoiceMode(): void {
+  const state = store.getState();
   if (state.mode === 'MUTED') {
     setVoiceMode('PUSH_TO_TALK');
     return;
@@ -67,6 +65,7 @@ export function toggleVoiceMuteMode(): void {
 }
 
 export function setKeyboardPushToTalkPressed(pressed: boolean): void {
+  const state = store.getState();
   if (pressed && state.mode !== 'PUSH_TO_TALK') {
     setVoiceMode('PUSH_TO_TALK');
   }
@@ -75,14 +74,14 @@ export function setKeyboardPushToTalkPressed(pressed: boolean): void {
     return;
   }
 
-  state = {
-    ...state,
+  store.setState((previous) => ({
+    ...previous,
     keyboardPushToTalkPressed: pressed,
-  };
-  emit();
+  }));
 }
 
 export function setUIPushToTalkPressed(pressed: boolean): void {
+  const state = store.getState();
   if (pressed && state.mode !== 'PUSH_TO_TALK') {
     setVoiceMode('PUSH_TO_TALK');
   }
@@ -91,30 +90,30 @@ export function setUIPushToTalkPressed(pressed: boolean): void {
     return;
   }
 
-  state = {
-    ...state,
+  store.setState((previous) => ({
+    ...previous,
     uiPushToTalkPressed: pressed,
-  };
-  emit();
+  }));
 }
 
 export function setRemotePlayerMuted(playerId: string, muted: boolean): void {
+  const state = store.getState();
   const current = Boolean(state.mutedRemotePlayerIds[playerId]);
   if (current === muted) {
     return;
   }
 
-  state = {
-    ...state,
+  store.setState((previous) => ({
+    ...previous,
     mutedRemotePlayerIds: {
-      ...state.mutedRemotePlayerIds,
+      ...previous.mutedRemotePlayerIds,
       [playerId]: muted,
     },
-  };
-  emit();
+  }));
 }
 
 export function setVoiceUIRemotePlayers(players: VoiceUIRemotePlayer[]): void {
+  const state = store.getState();
   const sortedPlayers = [...players].sort((left, right) => left.name.localeCompare(right.name));
   const nextIds = new Set(sortedPlayers.map((player) => player.id));
 
@@ -145,21 +144,13 @@ export function setVoiceUIRemotePlayers(players: VoiceUIRemotePlayer[]): void {
     return;
   }
 
-  state = {
-    ...state,
+  store.setState((previous) => ({
+    ...previous,
     remotePlayers: sortedPlayers,
     mutedRemotePlayerIds: nextMutedRemotePlayerIds,
-  };
-  emit();
+  }));
 }
 
 export function resetVoiceControlState(): void {
-  state = { ...DEFAULT_STATE };
-  emit();
-}
-
-function emit(): void {
-  for (const listener of listeners) {
-    listener();
-  }
+  store.reset();
 }

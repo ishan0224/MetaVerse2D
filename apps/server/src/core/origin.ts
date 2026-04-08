@@ -1,3 +1,5 @@
+/** @module apps/server/src/core/origin.ts */
+
 export function normalizeOrigin(origin: string): string | null {
   try {
     const parsed = new URL(origin);

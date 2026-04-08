@@ -2,7 +2,9 @@
 
 import { useSyncExternalStore } from 'react';
 
+import { HudCircle } from '@/components/ui';
 import { ENABLE_TEST_MINIMAP } from '@/config/features';
+import { numberToHexColor } from '@/lib/colorUtils';
 import { getRuntimeUiState, subscribeToRuntimeUiState } from '@/lib/runtimeUiStore';
 
 export function BottomAvatarCircle() {
@@ -13,7 +15,7 @@ export function BottomAvatarCircle() {
 
   return (
     <div className={`pointer-events-none absolute z-20 ${positionClass}`}>
-      <div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-full border border-white/20 bg-black/60 shadow-md backdrop-blur sm:h-12 sm:w-12">
+      <HudCircle size="sm">
         {state.avatarUrl ? (
           <img
             src={state.avatarUrl}
@@ -31,12 +33,7 @@ export function BottomAvatarCircle() {
             />
           </div>
         )}
-      </div>
+      </HudCircle>
     </div>
   );
-}
-
-function numberToHexColor(color: number): string {
-  const clamped = Math.max(0, Math.min(0xffffff, color >>> 0));
-  return `#${clamped.toString(16).padStart(6, '0')}`;
 }

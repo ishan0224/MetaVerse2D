@@ -47,6 +47,7 @@ type RasterizedTileset = Tileset & {
 };
 
 const rasterizedMapCache = new Map<string, Promise<RasterizedMinimapMap>>();
+const MAX_RASTERIZED_MAP_CACHE_ENTRIES = 8;
 
 export function getRasterizedMinimapMap(targetWidth: number, targetHeight: number): Promise<RasterizedMinimapMap> {
   const safeTargetWidth = Math.max(1, Math.round(targetWidth));
@@ -54,11 +55,19 @@ export function getRasterizedMinimapMap(targetWidth: number, targetHeight: numbe
   const cacheKey = `${FULL_MAP_TILEMAP_JSON_PATH}:${safeTargetWidth}x${safeTargetHeight}`;
   const cached = rasterizedMapCache.get(cacheKey);
   if (cached) {
+    rasterizedMapCache.delete(cacheKey);
+    rasterizedMapCache.set(cacheKey, cached);
     return cached;
   }
 
   const mapPromise = buildRasterizedMinimapMap(safeTargetWidth, safeTargetHeight);
   rasterizedMapCache.set(cacheKey, mapPromise);
+  if (rasterizedMapCache.size > MAX_RASTERIZED_MAP_CACHE_ENTRIES) {
+    const oldestEntry = rasterizedMapCache.keys().next().value;
+    if (oldestEntry) {
+      rasterizedMapCache.delete(oldestEntry);
+    }
+  }
   return mapPromise;
 }
 

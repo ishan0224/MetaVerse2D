@@ -1,3 +1,5 @@
+/** @module apps/web/network/rtc/rtcManager.ts */
+
 import { webEnv } from '@/config/env';
 import {
   onWebRTCAnswer,

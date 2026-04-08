@@ -1,3 +1,5 @@
+/** @module apps/server/src/db/queries/playerState.ts */
+
 import { eq } from 'drizzle-orm';
 
 import type { DbClient } from '../client';

@@ -1,3 +1,5 @@
+/** @module apps/server/src/socket/index.ts */
+
 import type { Server as HttpServer } from 'node:http';
 
 import { Server as SocketIOServer, type Socket } from 'socket.io';

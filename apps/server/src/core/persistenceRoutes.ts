@@ -1,3 +1,5 @@
+/** @module apps/server/src/core/persistenceRoutes.ts */
+
 import { normalizeEmail, validateEmailAddress, validateUsername } from '@metaverse2d/shared';
 import type { Express, Request, Response } from 'express';
 
@@ -6,6 +8,7 @@ import {
   isSupabaseAuthConfigured,
   verifySupabaseAccessToken,
 } from '../auth/supabaseAuth';
+import { normalizeAvatarUrl } from '../domain/avatarUtils';
 import { PlayerPersistenceService } from '../services/playerPersistenceService';
 
 const persistenceService = new PlayerPersistenceService();
@@ -236,21 +239,4 @@ function extractAccessToken(request: Request): string | null {
 
 function resolveAuthEmail(authUser: AuthenticatedSupabaseUser): string {
   return authUser.email?.trim().toLowerCase() || `${authUser.authUserId}@users.local`;
-}
-
-function normalizeAvatarUrl(avatarUrl: string | undefined): string | undefined {
-  const trimmed = avatarUrl?.trim();
-  if (!trimmed) {
-    return undefined;
-  }
-
-  try {
-    const parsed = new URL(trimmed);
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      return undefined;
-    }
-    return parsed.toString();
-  } catch {
-    return undefined;
-  }
 }

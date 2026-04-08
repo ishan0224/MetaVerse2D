@@ -1,5 +1,7 @@
 import { MAX_CHAT_MESSAGES, type RoomChatMessage } from '@metaverse2d/shared';
 
+import { createObservableStore } from '@/lib/createObservableStore';
+
 type RoomChatState = {
   roomScopeId: string;
   messages: RoomChatMessage[];
@@ -11,39 +13,35 @@ const DEFAULT_STATE: RoomChatState = {
   messages: [],
 };
 
-let state: RoomChatState = { ...DEFAULT_STATE };
-const listeners = new Set<() => void>();
+const store = createObservableStore(DEFAULT_STATE);
 
 export function subscribeToRoomChatState(listener: () => void): () => void {
-  listeners.add(listener);
-  return () => {
-    listeners.delete(listener);
-  };
+  return store.subscribe(listener);
 }
 
 export function getRoomChatState(): RoomChatState {
-  return state;
+  return store.getState();
 }
 
 export function resetRoomChatState(): void {
-  state = { ...DEFAULT_STATE };
-  emit();
+  store.reset();
 }
 
 export function setRoomChatScope(worldId: string, roomId: string): void {
+  const state = store.getState();
   const nextScopeId = buildRoomScopeId(worldId, roomId);
   if (state.roomScopeId === nextScopeId) {
     return;
   }
 
-  state = {
+  store.setState(() => ({
     roomScopeId: nextScopeId,
     messages: [],
-  };
-  emit();
+  }));
 }
 
 export function appendRoomChatMessage(message: RoomChatMessage): void {
+  const state = store.getState();
   if (!message || message.roomScopeId !== state.roomScopeId) {
     return;
   }
@@ -53,11 +51,10 @@ export function appendRoomChatMessage(message: RoomChatMessage): void {
   }
 
   const nextMessages = appendAndTrimRoomChatMessages(state.messages, message);
-  state = {
-    ...state,
+  store.setState((previous) => ({
+    ...previous,
     messages: nextMessages,
-  };
-  emit();
+  }));
 }
 
 function appendAndTrimRoomChatMessages(
@@ -81,10 +78,4 @@ function buildRoomScopeId(worldId: string, roomId: string): string {
 function normalizeScopeSegment(value: string): string {
   const trimmed = value.trim();
   return trimmed || '1';
-}
-
-function emit(): void {
-  for (const listener of listeners) {
-    listener();
-  }
 }

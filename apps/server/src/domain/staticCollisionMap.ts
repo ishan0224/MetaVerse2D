@@ -1,3 +1,5 @@
+/** @module apps/server/src/domain/staticCollisionMap.ts */
+
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 

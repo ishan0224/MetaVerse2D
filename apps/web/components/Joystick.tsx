@@ -25,6 +25,23 @@ export function Joystick() {
 
     let disposed = false;
     let activeIdentifier: number | null = null;
+    let createJoystickFactory: ((options: Options) => JoystickManager) | null = null;
+    let isManagerInitializationInFlight = false;
+    let shouldReinitializeManagerAfterInit = false;
+    let zoneMutationObserver: MutationObserver | null = null;
+
+    const joystickOptions: Options = {
+      zone: zoneElement,
+      mode: 'static',
+      position: { left: '50%', top: '50%' },
+      multitouch: false,
+      maxNumberOfNipples: 1,
+      size: JOYSTICK_SIZE_PX,
+      color: 'white',
+      dynamicPage: true,
+      restOpacity: JOYSTICK_BASE_ALPHA,
+      fadeTime: 150,
+    };
 
     const releaseMovement = (eventData?: unknown, outputData?: unknown) => {
       const identifier = resolveEventIdentifier(eventData, outputData);
@@ -57,7 +74,53 @@ export function Joystick() {
       clearZoneArtifacts();
     };
 
+    const createManager = () => {
+      if (!createJoystickFactory || disposed) {
+        return;
+      }
+
+      releaseMovement();
+      destroyManager();
+
+      const nextManager = createJoystickFactory(joystickOptions);
+      if (disposed) {
+        nextManager.destroy();
+        clearZoneArtifacts();
+        return;
+      }
+
+      joystickManagerRef.current = nextManager;
+      nextManager.on('start', handleStart);
+      nextManager.on('move', handleMove);
+      nextManager.on('end', releaseMovement);
+      nextManager.on('removed', releaseMovement);
+      nextManager.on('destroyed', releaseMovement);
+    };
+
+    const reinitializeManager = () => {
+      if (disposed) {
+        return;
+      }
+
+      if (isManagerInitializationInFlight) {
+        shouldReinitializeManagerAfterInit = true;
+        return;
+      }
+
+      createManager();
+    };
+
+    const ensureSingleJoystickInstance = () => {
+      const renderedJoysticks = zoneElement.querySelectorAll('[id^="joystick_"]');
+      if (renderedJoysticks.length <= 1) {
+        return;
+      }
+
+      reinitializeManager();
+    };
+
     const handleStart = (eventData: unknown, outputData?: unknown) => {
+      ensureSingleJoystickInstance();
       const identifier = resolveEventIdentifier(eventData, outputData);
       if (activeIdentifier === null) {
         activeIdentifier = identifier;
@@ -128,57 +191,56 @@ export function Joystick() {
     document.addEventListener('touchcancel', handleTouchCancel, { passive: true });
     document.addEventListener('touchend', handleTouchEnd, { passive: true });
 
-    const joystickOptions: Options = {
-      zone: zoneElement,
-      mode: 'static',
-      position: { left: '50%', top: '50%' },
-      multitouch: false,
-      maxNumberOfNipples: 1,
-      size: JOYSTICK_SIZE_PX,
-      color: 'white',
-      dynamicPage: true,
-      restOpacity: JOYSTICK_BASE_ALPHA,
-      fadeTime: 150,
-    };
+    if (typeof MutationObserver !== 'undefined') {
+      zoneMutationObserver = new MutationObserver(() => {
+        ensureSingleJoystickInstance();
+      });
+      zoneMutationObserver.observe(zoneElement, { childList: true });
+    }
 
-    void (async () => {
+    const initializeManager = async () => {
+      if (disposed || isManagerInitializationInFlight) {
+        return;
+      }
+
+      isManagerInitializationInFlight = true;
       try {
-        const nippleModule = await import('nipplejs');
-        if (disposed) {
-          return;
+        if (!createJoystickFactory) {
+          const nippleModule = await import('nipplejs');
+          if (disposed) {
+            return;
+          }
+
+          const createJoystick =
+            nippleModule.create ??
+            (nippleModule.default as { create?: typeof nippleModule.create } | undefined)?.create;
+          if (!createJoystick) {
+            throw new Error('nipplejs create() is unavailable');
+          }
+
+          createJoystickFactory = createJoystick;
         }
 
-        const createJoystick =
-          nippleModule.create ??
-          (nippleModule.default as { create?: typeof nippleModule.create } | undefined)?.create;
-        if (!createJoystick) {
-          throw new Error('nipplejs create() is unavailable');
-        }
-
-        destroyManager();
-        const nextManager = createJoystick(joystickOptions);
-        if (disposed) {
-          nextManager.destroy();
-          clearZoneArtifacts();
-          return;
-        }
-
-        joystickManagerRef.current = nextManager;
-        nextManager.on('start', handleStart);
-        nextManager.on('move', handleMove);
-        nextManager.on('end', releaseMovement);
-        nextManager.on('removed', releaseMovement);
-        nextManager.on('destroyed', releaseMovement);
+        createManager();
       } catch (error) {
         console.error('virtual joystick failed to initialize', error);
         releaseMovement();
         destroyManager();
+      } finally {
+        isManagerInitializationInFlight = false;
+        if (shouldReinitializeManagerAfterInit && !disposed) {
+          shouldReinitializeManagerAfterInit = false;
+          createManager();
+        }
       }
-    })();
+    };
+
+    void initializeManager();
 
     return () => {
       disposed = true;
       releaseMovement();
+      zoneMutationObserver?.disconnect();
       window.removeEventListener('orientationchange', handleViewportChange);
       window.removeEventListener('resize', handleViewportChange);
       window.removeEventListener('blur', handleWindowBlur);
