@@ -324,7 +324,7 @@ export function GameCanvas() {
     };
 
     const onDisconnect = (reason: string) => {
-      if (reason === 'io client disconnect') {
+      if (reason === 'io client disconnect' || reason === 'io server disconnect') {
         setSocketUiStatus('DISCONNECTED');
         return;
       }

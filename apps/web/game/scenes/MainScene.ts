@@ -25,10 +25,11 @@ import { InputHandler } from '@/game/systems/InputHandler';
 import { MovementSystem } from '@/game/systems/MovementSystem';
 import { MultiplayerSystem } from '@/game/systems/MultiplayerSystem';
 import { ProximityVoiceSystem } from '@/game/systems/ProximityVoiceSystem';
-import { setVoiceUIRemotePlayers } from '@/game/systems/voiceControlStore';
+import { deriveVoiceBubbleVisibility } from '@/game/systems/voiceBubbleVisibility';
+import { getVoiceControlState, setVoiceUIRemotePlayers } from '@/game/systems/voiceControlStore';
 import { ensureCharacterAnimations } from '@/game/utils/characterAnimations';
 import { getInactivityUiState, resetInactivityTimer } from '@/lib/inactivityUiStore';
-import { getRTCManager } from '@/network/rtc/rtcManager';
+import { getRTCManager, type VoiceActivitySample } from '@/network/rtc/rtcManager';
 
 const REMOTE_RENDER_DELAY_MS = 100;
 const MAX_FRAME_DELTA_TOTAL_MS = 250;
@@ -43,6 +44,8 @@ const PLAYER_TOUCH_DISTANCE = PLAYER_STATIC_COLLIDER_SIZE + 10;
 const STILL_PLAYER_WINDOW_MS = 300;
 const BUMP_WARNING_COOLDOWN_MS = 15_000;
 const MOTION_EPSILON = 0.6;
+const VOICE_SAMPLE_INTERVAL_MS = 33;
+const VOICE_SIGNAL_HOLD_MS = 280;
 
 type LocalPlayerSnapshot = NonNullable<ReturnType<MultiplayerSystem['getLocalPlayer']>>;
 type InputState = ReturnType<InputHandler['getInputState']>;
@@ -72,6 +75,11 @@ export class MainScene extends Phaser.Scene {
   private mapWorldHeight: number = WORLD_CONFIG.height;
   private readonly bumpWarningCooldownByPlayerId = new Map<string, number>();
   private readonly motionSnapshotsByPlayerId = new Map<string, MotionSnapshot>();
+  private lastVoiceSampleAtMs = Number.NEGATIVE_INFINITY;
+  private localVoiceSample: VoiceActivitySample | null = null;
+  private localLastVoiceSignalAtMs: number | null = null;
+  private readonly remoteVoiceSampleByPlayerId = new Map<string, VoiceActivitySample | null>();
+  private readonly remoteLastVoiceSignalAtByPlayerId = new Map<string, number | null>();
 
   public constructor() {
     super(MainScene.KEY);
@@ -155,6 +163,11 @@ export class MainScene extends Phaser.Scene {
       this.remoteInactivityPhases.clear();
       this.bumpWarningCooldownByPlayerId.clear();
       this.motionSnapshotsByPlayerId.clear();
+      this.remoteVoiceSampleByPlayerId.clear();
+      this.remoteLastVoiceSignalAtByPlayerId.clear();
+      this.localVoiceSample = null;
+      this.localLastVoiceSignalAtMs = null;
+      this.lastVoiceSampleAtMs = Number.NEGATIVE_INFINITY;
     });
   }
 
@@ -172,12 +185,14 @@ export class MainScene extends Phaser.Scene {
     const localPlayerState = this.multiplayerSystem.getLocalPlayer();
     const remotePlayers = this.multiplayerSystem.getRemotePlayers();
     const localPlayerPosition = this.getLocalRenderPosition(localPlayerState);
+    const localNearbyPlayerIds = this.multiplayerSystem.getLocalNearbyPlayerIds();
     this.proximityVoiceSystem.update({
       localPlayerId: localPlayerState?.id ?? null,
       localPlayerPosition,
-      nearbyPlayerIds: this.multiplayerSystem.getLocalNearbyPlayerIds(),
+      nearbyPlayerIds: localNearbyPlayerIds,
       remotePlayers,
     });
+    this.updateVoiceWaveBubbles(nowMs, localPlayerState);
     setVoiceUIRemotePlayers(
       remotePlayers.map((player) => ({
         id: player.id,
@@ -268,6 +283,7 @@ export class MainScene extends Phaser.Scene {
       this.remoteInactivityPhases.delete(playerId);
       this.motionSnapshotsByPlayerId.delete(playerId);
       this.bumpWarningCooldownByPlayerId.delete(playerId);
+      this.remoteVoiceSampleByPlayerId.delete(playerId);
     }
   }
 
@@ -518,6 +534,79 @@ export class MainScene extends Phaser.Scene {
     this.bumpWarningCooldownByPlayerId.set(target.id, nowMs);
   }
 
+  private updateVoiceWaveBubbles(nowMs: number, localPlayerState: LocalPlayerSnapshot | null): void {
+    const rtcManager = getRTCManager();
+    if (nowMs - this.lastVoiceSampleAtMs >= VOICE_SAMPLE_INTERVAL_MS) {
+      this.lastVoiceSampleAtMs = nowMs;
+      this.localVoiceSample = rtcManager.sampleLocalVoiceActivity();
+      for (const remotePlayerId of this.remotePlayers.keys()) {
+        this.remoteVoiceSampleByPlayerId.set(
+          remotePlayerId,
+          rtcManager.samplePeerVoiceActivity(remotePlayerId),
+        );
+      }
+    }
+
+    const activeRemoteIds = new Set(this.remotePlayers.keys());
+    for (const remotePlayerId of this.remoteVoiceSampleByPlayerId.keys()) {
+      if (!activeRemoteIds.has(remotePlayerId)) {
+        this.remoteVoiceSampleByPlayerId.delete(remotePlayerId);
+      }
+    }
+    for (const remotePlayerId of this.remoteLastVoiceSignalAtByPlayerId.keys()) {
+      if (!activeRemoteIds.has(remotePlayerId)) {
+        this.remoteLastVoiceSignalAtByPlayerId.delete(remotePlayerId);
+      }
+    }
+
+    const localMicEnabled = resolveMicEnabled(getVoiceControlState());
+    const localVisibility = deriveVoiceBubbleVisibility({
+      perspective: 'LOCAL_SELF',
+      nowMs,
+      hasAudioStream: rtcManager.hasLocalAudioStream() && Boolean(localPlayerState),
+      hasSignal: this.localVoiceSample?.hasSignal ?? false,
+      signalHoldMs: VOICE_SIGNAL_HOLD_MS,
+      lastSignalAtMs: this.localLastVoiceSignalAtMs,
+      micGateOpen: localMicEnabled,
+      inProximity: true,
+    });
+    this.localLastVoiceSignalAtMs = localVisibility.nextLastSignalAtMs;
+    this.player.updateVoiceWaveBubble({
+      nowMs,
+      visible: localVisibility.visible,
+      reactiveBarScales: this.localVoiceSample?.barScales ?? null,
+      hasReactiveSignal: this.localVoiceSample?.hasSignal ?? false,
+      hasAnalyser: this.localVoiceSample !== null,
+    });
+
+    const localPlayerId = localPlayerState?.id ?? null;
+    const localNearbyPlayerIds = new Set(this.multiplayerSystem.getLocalNearbyPlayerIds());
+    for (const [remotePlayerId, remotePlayer] of this.remotePlayers) {
+      const remoteVoiceSample = this.remoteVoiceSampleByPlayerId.get(remotePlayerId) ?? null;
+      const remoteVisibility = deriveVoiceBubbleVisibility({
+        perspective: 'REMOTE_OTHER',
+        nowMs,
+        hasAudioStream: Boolean(localPlayerId) && rtcManager.hasPeerAudioStream(remotePlayerId),
+        hasSignal: remoteVoiceSample?.hasSignal ?? false,
+        signalHoldMs: VOICE_SIGNAL_HOLD_MS,
+        lastSignalAtMs: this.remoteLastVoiceSignalAtByPlayerId.get(remotePlayerId) ?? null,
+        micGateOpen: true,
+        inProximity: Boolean(localPlayerId) && localNearbyPlayerIds.has(remotePlayerId),
+      });
+      this.remoteLastVoiceSignalAtByPlayerId.set(
+        remotePlayerId,
+        remoteVisibility.nextLastSignalAtMs,
+      );
+      remotePlayer.updateVoiceWaveBubble({
+        nowMs,
+        visible: remoteVisibility.visible,
+        reactiveBarScales: remoteVoiceSample?.barScales ?? null,
+        hasReactiveSignal: remoteVoiceSample?.hasSignal ?? false,
+        hasAnalyser: remoteVoiceSample !== null,
+      });
+    }
+  }
+
   private hasMovementIntent(inputState: InputState): boolean {
     if (inputState.up || inputState.down || inputState.left || inputState.right) {
       return true;
@@ -545,4 +634,16 @@ export class MainScene extends Phaser.Scene {
 
     return nextPosition;
   }
+}
+
+function resolveMicEnabled(voiceState: ReturnType<typeof getVoiceControlState>): boolean {
+  if (voiceState.mode === 'MUTED') {
+    return false;
+  }
+
+  if (voiceState.mode === 'ALWAYS_ON') {
+    return true;
+  }
+
+  return voiceState.keyboardPushToTalkPressed || voiceState.uiPushToTalkPressed;
 }

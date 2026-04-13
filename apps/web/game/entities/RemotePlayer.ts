@@ -22,6 +22,7 @@ import {
 } from '@/game/utils/bumpWarningBubble';
 import { getWalkAnimationKey } from '@/game/utils/characterAnimations';
 import { createNameLabel, updateNameLabelPosition } from '@/game/utils/createNameLabel';
+import { VoiceWaveBubble } from '@/game/utils/voiceWaveBubble';
 
 type Position = {
   x: number;
@@ -73,6 +74,7 @@ export class RemotePlayer {
   private inactivityPhase: InactivityPhase = 0;
   private idleTransitionTimer: Phaser.Time.TimerEvent | null = null;
   private readonly bumpWarningBubble: BumpWarningBubble;
+  private readonly voiceWaveBubble: VoiceWaveBubble;
   private bumpWarningHideTimer: Phaser.Time.TimerEvent | null = null;
   private destroyed = false;
 
@@ -105,6 +107,7 @@ export class RemotePlayer {
     this.inactivityLabel.setOrigin(0.5, 1);
     this.inactivityLabel.setVisible(false);
     this.bumpWarningBubble = createBumpWarningBubble(scene);
+    this.voiceWaveBubble = new VoiceWaveBubble(scene);
     this.positionBuffer.push({ x, y, timestamp });
     this.avatarId = normalizeAvatarId(avatarId);
     this.characterSprite = this.createCharacterSprite();
@@ -217,6 +220,30 @@ export class RemotePlayer {
     this.applyInactivityVisualState();
   }
 
+  public updateVoiceWaveBubble({
+    nowMs,
+    visible,
+    reactiveBarScales,
+    hasReactiveSignal,
+    hasAnalyser,
+  }: {
+    nowMs: number;
+    visible: boolean;
+    reactiveBarScales: number[] | null;
+    hasReactiveSignal: boolean;
+    hasAnalyser: boolean;
+  }): void {
+    this.voiceWaveBubble.update({
+      position: this.position,
+      playerSize: this.size,
+      nowMs,
+      visible,
+      reactiveBarScales,
+      hasReactiveSignal,
+      hasAnalyser,
+    });
+  }
+
   public destroy(): void {
     this.destroyed = true;
     if (this.idleTransitionTimer) {
@@ -228,6 +255,7 @@ export class RemotePlayer {
       this.bumpWarningHideTimer = null;
     }
     destroyBumpWarningBubble(this.bumpWarningBubble);
+    this.voiceWaveBubble.destroy();
     this.clearAvatarSprite();
     this.characterSprite?.destroy();
     this.characterSprite = null;
@@ -441,5 +469,6 @@ export class RemotePlayer {
     this.nameLabel.setDepth(depth + 1);
     this.inactivityLabel.setDepth(depth + 2);
     setBumpWarningBubbleDepth(this.bumpWarningBubble, depth);
+    this.voiceWaveBubble.setDepth(depth);
   }
 }

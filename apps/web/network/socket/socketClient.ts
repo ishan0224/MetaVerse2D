@@ -120,8 +120,8 @@ export function getSocketClient(): GameSocket {
       }
     });
 
-    socket.on('disconnect', () => {
-      console.log('disconnected from server');
+    socket.on('disconnect', (reason) => {
+      console.log(`disconnected from server (${reason})`);
     });
 
     socket.on('connect_error', (error) => {

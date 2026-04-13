@@ -6,12 +6,12 @@ import {
   INACTIVITY_ACTIVITY_EVENT,
   INACTIVITY_KICK_REQUEST_EVENT,
   INACTIVITY_PHASE_EVENT,
-  KICK_TIMEOUT_MS,
   type InactivityActivityPayload,
   type InactivityKickRequestPayload,
   type InactivityPhase,
   type InactivityPhasePayload,
   type InputState,
+  KICK_TIMEOUT_MS,
   MAX_CHAT_TEXT_LENGTH,
   type NearbyPlayersMap,
   type RoomChatMessage,
@@ -103,6 +103,7 @@ const playerManager = new PlayerManager();
 const proximitySystem = new ProximitySystem();
 const playerPersistenceService = new PlayerPersistenceService();
 const socketPersistenceUserIds = new Map<string, string>();
+const activeSocketIdByAuthUserId = new Map<string, string>();
 const scopeSnapshotSeq = new Map<string, number>();
 const socketLastProcessedInputSeq = new Map<string, number>();
 const socketInactivityState = new Map<string, { lastMovedAt: number; inactivityPhase: InactivityPhase }>();
@@ -142,12 +143,50 @@ function buildPlayersUpdatePayload(scopeId: string): PlayersUpdatePayload {
   };
 }
 
+function removeSocketPresence(io: SocketIOServer, socketId: string): string | null {
+  const removedDueToInactivity = inactivityKickPendingSocketIds.has(socketId);
+  inactivityKickPendingSocketIds.delete(socketId);
+  const player = playerManager.getPlayer(socketId);
+  const userId = socketPersistenceUserIds.get(socketId);
+  const scopeId = playerManager.removePlayer(socketId);
+  socketPersistenceUserIds.delete(socketId);
+  socketLastProcessedInputSeq.delete(socketId);
+  socketInactivityState.delete(socketId);
+
+  if (player && userId) {
+    void playerPersistenceService.persistPlayerState({
+      socketId,
+      userId,
+      x: player.x,
+      y: player.y,
+      worldId: player.worldId,
+      roomId: player.roomId,
+    });
+  }
+
+  if (scopeId) {
+    if (removedDueToInactivity && player) {
+      io.to(scopeId).emit(CHAT_EVENT_MESSAGE, createInactivitySystemMessage(scopeId, player.name));
+    }
+    io.to(scopeId).emit(PLAYERS_UPDATE_EVENT, buildPlayersUpdatePayload(scopeId));
+  }
+
+  return scopeId;
+}
+
 export function registerSocketHandlers(io: SocketIOServer, socket: Socket): void {
   const authUser = getSocketAuthUser(socket);
   if (!authUser) {
     socket.disconnect(true);
     return;
   }
+
+  const existingSocketIdForAuthUser = activeSocketIdByAuthUserId.get(authUser.authUserId);
+  if (existingSocketIdForAuthUser && existingSocketIdForAuthUser !== socket.id) {
+    removeSocketPresence(io, existingSocketIdForAuthUser);
+    io.sockets.sockets.get(existingSocketIdForAuthUser)?.disconnect(true);
+  }
+  activeSocketIdByAuthUserId.set(authUser.authUserId, socket.id);
 
   console.log(`user connected: ${socket.id}`);
   getOrCreateInactivityState(socket.id, Date.now());
@@ -356,32 +395,10 @@ export function registerSocketHandlers(io: SocketIOServer, socket: Socket): void
   });
 
   socket.on('disconnect', () => {
-    const removedDueToInactivity = inactivityKickPendingSocketIds.has(socket.id);
-    inactivityKickPendingSocketIds.delete(socket.id);
-    const player = playerManager.getPlayer(socket.id);
-    const userId = socketPersistenceUserIds.get(socket.id);
-    const scopeId = playerManager.removePlayer(socket.id);
+    removeSocketPresence(io, socket.id);
     console.log(`user disconnected: ${socket.id}`);
-    socketPersistenceUserIds.delete(socket.id);
-    socketLastProcessedInputSeq.delete(socket.id);
-    socketInactivityState.delete(socket.id);
-
-    if (player && userId) {
-      void playerPersistenceService.persistPlayerState({
-        socketId: socket.id,
-        userId,
-        x: player.x,
-        y: player.y,
-        worldId: player.worldId,
-        roomId: player.roomId,
-      });
-    }
-
-    if (scopeId) {
-      if (removedDueToInactivity && player) {
-        io.to(scopeId).emit(CHAT_EVENT_MESSAGE, createInactivitySystemMessage(scopeId, player.name));
-      }
-      io.to(scopeId).emit(PLAYERS_UPDATE_EVENT, buildPlayersUpdatePayload(scopeId));
+    if (activeSocketIdByAuthUserId.get(authUser.authUserId) === socket.id) {
+      activeSocketIdByAuthUserId.delete(authUser.authUserId);
     }
   });
 
