@@ -8,12 +8,15 @@ It combines a Phaser-powered game client, a Next.js web shell, a Socket.IO autho
 
 **Production:** [https://meta-verse2-d-web.vercel.app/](https://meta-verse2-d-web.vercel.app/)
 
-## Gameplay Preview (GIF Placeholder)
+## Gameplay Preview
 
-![MetaVerse2D Gameplay Placeholder](https://placehold.co/1200x675/0f172a/ffffff?text=Add+MetaVerse2D+Gameplay+GIF+Here)
+### Desktop Demo
 
-> Replace this placeholder with your real gameplay GIF.
-> Suggested path: `docs/media/metaverse2d-demo.gif`
+![MetaVerse2D Desktop Demo](./metaverse1.gif)
+
+### Mobile/Tablet Demo
+
+![MetaVerse2D Mobile and Tablet Demo](./metaversemobile.gif)
 
 ## Features
 
