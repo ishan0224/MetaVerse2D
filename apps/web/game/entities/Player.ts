@@ -1,3 +1,4 @@
+import type { InactivityPhase } from '@metaverse2d/shared/types/Inactivity';
 import * as Phaser from 'phaser';
 
 import {
@@ -20,6 +21,7 @@ import {
 } from '@/game/utils/bumpWarningBubble';
 import { getWalkAnimationKey } from '@/game/utils/characterAnimations';
 import { createNameLabel, updateNameLabelPosition } from '@/game/utils/createNameLabel';
+import { VoiceWaveBubble } from '@/game/utils/voiceWaveBubble';
 
 type Position = {
   x: number;
@@ -45,23 +47,31 @@ const WALK_EXIT_DELTA_THRESHOLD = 0.12;
 const IDLE_SETTLE_DELAY_MS = 120;
 const PLAYER_DEPTH_BASE = 100;
 const BUMP_WARNING_VISIBLE_MS = 1500;
+const INACTIVE_TINT = 0x94a3b8;
+const INACTIVE_ALPHA = 0.4;
+const ACTIVE_ALPHA = 1;
+const INACTIVE_LABEL_OFFSET_Y = 44;
 
 export class Player {
   private readonly id: string;
   private readonly scene: Phaser.Scene;
   private readonly size: number;
   private readonly sprite: Phaser.GameObjects.Rectangle;
+  private baseColor: number;
   private characterSprite: Phaser.GameObjects.Sprite | null = null;
   private avatarSprite: Phaser.GameObjects.Image | null = null;
   private readonly nameLabel: Phaser.GameObjects.Text;
+  private readonly inactivityLabel: Phaser.GameObjects.Text;
   private position: Position;
   private activeAvatarUrl: string | null = null;
   private avatarId: AvatarId = DEFAULT_AVATAR_ID;
   private facingDirection: MovementDirection = 'down';
   private isWalkAnimationActive = false;
   private hasMovementIntent = false;
+  private inactivityPhase: InactivityPhase = 0;
   private idleTransitionTimer: Phaser.Time.TimerEvent | null = null;
   private readonly bumpWarningBubble: BumpWarningBubble;
+  private readonly voiceWaveBubble: VoiceWaveBubble;
   private bumpWarningHideTimer: Phaser.Time.TimerEvent | null = null;
   private destroyed = false;
 
@@ -79,10 +89,21 @@ export class Player {
     this.id = id;
     this.scene = scene;
     this.size = size;
+    this.baseColor = color;
     this.position = { x, y };
     this.sprite = scene.add.rectangle(x, y, size, size, color);
     this.nameLabel = createNameLabel(scene, name, x, y);
+    this.inactivityLabel = scene.add.text(x, y - INACTIVE_LABEL_OFFSET_Y, '💤 Inactive', {
+      fontSize: '12px',
+      fontStyle: '700',
+      color: '#cbd5e1',
+      stroke: '#111827',
+      strokeThickness: 3,
+    });
+    this.inactivityLabel.setOrigin(0.5, 1);
+    this.inactivityLabel.setVisible(false);
     this.bumpWarningBubble = createBumpWarningBubble(scene);
+    this.voiceWaveBubble = new VoiceWaveBubble(scene);
     this.avatarId = normalizeAvatarId(avatarId);
     this.characterSprite = this.createCharacterSprite();
     this.setAvatarUrl(avatarUrl);
@@ -101,6 +122,7 @@ export class Player {
     this.characterSprite?.setPosition(x, y);
     this.avatarSprite?.setPosition(x, y);
     updateNameLabelPosition(this.nameLabel, x, y);
+    this.inactivityLabel.setPosition(x, y - INACTIVE_LABEL_OFFSET_Y);
     updateBumpWarningBubblePosition(this.bumpWarningBubble, this.position);
     this.updateCharacterAnimation(deltaX, deltaY);
     this.syncDepth();
@@ -119,6 +141,7 @@ export class Player {
     this.characterSprite?.setPosition(this.position.x, this.position.y);
     this.avatarSprite?.setPosition(this.position.x, this.position.y);
     updateNameLabelPosition(this.nameLabel, this.position.x, this.position.y);
+    this.inactivityLabel.setPosition(this.position.x, this.position.y - INACTIVE_LABEL_OFFSET_Y);
     updateBumpWarningBubblePosition(this.bumpWarningBubble, this.position);
     this.syncDepth();
   }
@@ -142,7 +165,9 @@ export class Player {
   }
 
   public setColor(color: number): void {
+    this.baseColor = color;
     this.sprite.setFillStyle(color);
+    this.applyInactivityVisualState();
   }
 
   public setAvatarId(avatarId: number | undefined): void {
@@ -180,6 +205,39 @@ export class Player {
     }
   }
 
+  public setInactivityPhase(inactivityPhase: InactivityPhase): void {
+    if (this.inactivityPhase === inactivityPhase) {
+      return;
+    }
+
+    this.inactivityPhase = inactivityPhase;
+    this.applyInactivityVisualState();
+  }
+
+  public updateVoiceWaveBubble({
+    nowMs,
+    visible,
+    reactiveBarScales,
+    hasReactiveSignal,
+    hasAnalyser,
+  }: {
+    nowMs: number;
+    visible: boolean;
+    reactiveBarScales: number[] | null;
+    hasReactiveSignal: boolean;
+    hasAnalyser: boolean;
+  }): void {
+    this.voiceWaveBubble.update({
+      position: this.position,
+      playerSize: this.size,
+      nowMs,
+      visible,
+      reactiveBarScales,
+      hasReactiveSignal,
+      hasAnalyser,
+    });
+  }
+
   public destroy(): void {
     this.destroyed = true;
     if (this.idleTransitionTimer) {
@@ -191,11 +249,13 @@ export class Player {
       this.bumpWarningHideTimer = null;
     }
     destroyBumpWarningBubble(this.bumpWarningBubble);
+    this.voiceWaveBubble.destroy();
     this.clearAvatarSprite();
     this.characterSprite?.destroy();
     this.characterSprite = null;
     this.sprite.destroy();
     this.nameLabel.destroy();
+    this.inactivityLabel.destroy();
   }
 
   private createCharacterSprite(): Phaser.GameObjects.Sprite | null {
@@ -234,10 +294,12 @@ export class Player {
     this.sprite.setVisible(false);
     if (this.isWalkAnimationActive || wasPlaying) {
       this.playWalkAnimation(this.facingDirection);
+      this.applyInactivityVisualState();
       return;
     }
 
     this.showIdleFrame();
+    this.applyInactivityVisualState();
   }
 
   private updateCharacterAnimation(deltaX: number, deltaY: number): void {
@@ -356,6 +418,7 @@ export class Player {
     this.avatarSprite.setVisible(true);
     this.characterSprite?.setVisible(false);
     this.sprite.setVisible(false);
+    this.applyInactivityVisualState();
   }
 
   private clearAvatarSprite(): void {
@@ -365,6 +428,30 @@ export class Player {
 
     this.avatarSprite.destroy();
     this.avatarSprite = null;
+    this.applyInactivityVisualState();
+  }
+
+  private applyInactivityVisualState(): void {
+    const isInactive = this.inactivityPhase >= 1 && this.inactivityPhase < 3;
+    const alpha = isInactive ? INACTIVE_ALPHA : ACTIVE_ALPHA;
+    this.sprite.setAlpha(alpha);
+    this.characterSprite?.setAlpha(alpha);
+    this.avatarSprite?.setAlpha(alpha);
+
+    if (isInactive) {
+      this.sprite.setFillStyle(INACTIVE_TINT);
+      this.characterSprite?.setTint(INACTIVE_TINT);
+      this.avatarSprite?.setTint(INACTIVE_TINT);
+      this.inactivityLabel.setVisible(true);
+      this.nameLabel.setAlpha(0.9);
+      return;
+    }
+
+    this.sprite.setFillStyle(this.baseColor);
+    this.characterSprite?.clearTint();
+    this.avatarSprite?.clearTint();
+    this.inactivityLabel.setVisible(false);
+    this.nameLabel.setAlpha(1);
   }
 
   private syncDepth(): void {
@@ -373,6 +460,8 @@ export class Player {
     this.characterSprite?.setDepth(depth);
     this.avatarSprite?.setDepth(depth);
     this.nameLabel.setDepth(depth + 1);
+    this.inactivityLabel.setDepth(depth + 2);
     setBumpWarningBubbleDepth(this.bumpWarningBubble, depth);
+    this.voiceWaveBubble.setDepth(depth);
   }
 }

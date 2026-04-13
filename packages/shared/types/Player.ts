@@ -1,3 +1,5 @@
+import type { InactivityPhase } from './Inactivity';
+
 export type Player = {
   id: string;
   x: number;
@@ -8,4 +10,6 @@ export type Player = {
   color: number;
   avatarId?: number;
   avatarUrl?: string;
+  inactivityPhase?: InactivityPhase;
+  lastMovedAt?: number;
 };

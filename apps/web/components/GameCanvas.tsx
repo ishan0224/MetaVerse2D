@@ -1,8 +1,9 @@
 'use client';
 
-import { type CSSProperties, useCallback, useEffect, useRef, useState } from 'react';
+import { type CSSProperties, useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
 import { CircularMinimap } from '@/components/CircularMinimap';
+import { InactivityWarningOverlay } from '@/components/InactivityWarningOverlay';
 import { JoinStatusOverlay } from '@/components/JoinStatusOverlay';
 import { MicModeCircle } from '@/components/MicModeCircle';
 import {
@@ -25,6 +26,14 @@ import {
   setRoomChatScope,
 } from '@/lib/chatUiStore';
 import {
+  getInactivityUiState,
+  requestInactivityKick,
+  resetInactivityTimer,
+  startInactivityMonitor,
+  stopInactivityMonitor,
+  subscribeToInactivityUiState,
+} from '@/lib/inactivityUiStore';
+import {
   resetRuntimeUiState,
   setJoinUiPhase,
   setMicPermissionStatus,
@@ -36,11 +45,11 @@ import {
 } from '@/lib/runtimeUiStore';
 import { useGameplayViewport } from '@/lib/useGameplayViewport';
 import {
-    getSocketClient,
-    listenToRoomChatMessages,
-    setPlayerAvatarId,
-    setPlayerAvatarUrl,
-    setPlayerName,
+  getSocketClient,
+  listenToRoomChatMessages,
+  setPlayerAvatarId,
+  setPlayerAvatarUrl,
+  setPlayerName,
   setRoomId,
   setWorldId,
 } from '@/network';
@@ -87,6 +96,11 @@ export function GameCanvas() {
   const gameRef = useRef<GameInstance | null>(null);
   const handoffTimerRef = useRef<number | null>(null);
   const gameplayViewport = useGameplayViewport();
+  const inactivityUiState = useSyncExternalStore(
+    subscribeToInactivityUiState,
+    getInactivityUiState,
+    getInactivityUiState,
+  );
   const [isGameReady, setIsGameReady] = useState(false);
   const [joinIdentity, setJoinIdentity] = useState<OnboardingDraft | null>(null);
   const [initialOnboardingDraft, setInitialOnboardingDraft] = useState<OnboardingDraft>(() =>
@@ -143,6 +157,7 @@ export function GameCanvas() {
     resetVoiceControlState();
     resetRoomChatState();
     resetRuntimeUiState();
+    stopInactivityMonitor();
     setIsGameReady(false);
     setHandoffState('SCREENSHOT_VISIBLE');
     const baseBackdrop = new Image();
@@ -170,6 +185,7 @@ export function GameCanvas() {
       resetVoiceControlState();
       resetRoomChatState();
       resetRuntimeUiState();
+      stopInactivityMonitor();
     };
   }, []);
 
@@ -297,6 +313,8 @@ export function GameCanvas() {
     setPlayerAvatarId(requestedAvatarId);
     setPlayerAvatarUrl(null);
     setRoomChatScope(requestedWorldId, requestedRoomId);
+    startInactivityMonitor();
+    resetInactivityTimer('manual-presence', { forceBroadcast: true });
 
     const onConnect = () => {
       setSocketUiStatus('CONNECTED');
@@ -306,7 +324,7 @@ export function GameCanvas() {
     };
 
     const onDisconnect = (reason: string) => {
-      if (reason === 'io client disconnect') {
+      if (reason === 'io client disconnect' || reason === 'io server disconnect') {
         setSocketUiStatus('DISCONNECTED');
         return;
       }
@@ -339,6 +357,8 @@ export function GameCanvas() {
         avatarId?: number;
         avatarUrl?: string;
         timestamp: number;
+        inactivityPhase?: number;
+        lastMovedAt?: number;
       }>;
       proximity: Record<string, string[]>;
     }) => {
@@ -443,6 +463,7 @@ export function GameCanvas() {
       resetVoiceControlState();
       resetRoomChatState();
       resetRuntimeUiState();
+      stopInactivityMonitor();
     };
   }, [isGameReady, joinIdentity]);
 
@@ -485,6 +506,26 @@ export function GameCanvas() {
     syncGameScaleToContainer,
   ]);
 
+  useEffect(() => {
+    if (!hasJoinedFlowStarted) {
+      return;
+    }
+
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+
+    const onCanvasPointerDown = () => {
+      resetInactivityTimer('canvas-click');
+    };
+
+    container.addEventListener('pointerdown', onCanvasPointerDown);
+    return () => {
+      container.removeEventListener('pointerdown', onCanvasPointerDown);
+    };
+  }, [hasJoinedFlowStarted]);
+
   const screenshotLayer = screenshotShouldRender ? (
     <div
       className={`pointer-events-none absolute inset-0 z-0 overflow-hidden transition-opacity duration-[240ms] ease-out ${screenshotOpacityClass}`}
@@ -500,10 +541,11 @@ export function GameCanvas() {
       />
     </div>
   ) : null;
+  const shouldShowInactivityWarningModal = inactivityUiState.inactivityPhase === 2;
   const gameplayCanvasElement = (
     <div
       ref={containerRef}
-      className={`relative z-10 h-full w-full transition-opacity duration-[240ms] ease-out ${shouldUseTouchGameplayLayout ? 'gameplay-touch-shell' : ''} ${gameCanvasOpacityClass}`}
+      className={`relative z-10 h-full w-full transition-opacity duration-[240ms] ease-out ${shouldUseTouchGameplayLayout ? 'gameplay-touch-shell' : ''} ${gameCanvasOpacityClass} ${shouldShowInactivityWarningModal ? 'pointer-events-none' : ''}`}
     />
   );
   const shouldRenderDesktopHud = hasJoinedFlowStarted && !shouldUseTouchGameplayLayout;
@@ -548,6 +590,17 @@ export function GameCanvas() {
       {shouldRenderChatOverlay ? <RoomChatOverlay /> : null}
       {shouldRenderDesktopHud && ENABLE_TEST_MINIMAP ? <CircularMinimap /> : null}
       {shouldGuardPortraitGameplay ? <RotateDeviceOverlay /> : null}
+      {shouldShowInactivityWarningModal ? (
+        <InactivityWarningOverlay
+          countdownSeconds={inactivityUiState.warningCountdownS}
+          onStay={() => {
+            resetInactivityTimer('manual-presence', { forceBroadcast: true });
+          }}
+          onLeave={() => {
+            requestInactivityKick('leave');
+          }}
+        />
+      ) : null}
     </div>
   );
 }

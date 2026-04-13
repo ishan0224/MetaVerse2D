@@ -1,3 +1,4 @@
+import type { InactivityPhase } from '@metaverse2d/shared/types/Inactivity';
 import type { InputState } from '@metaverse2d/shared/types/InputState';
 
 import {
@@ -24,6 +25,8 @@ type PlayerSnapshot = {
   snapshotSeq: number;
   serverTimeMs?: number;
   lastProcessedInputSeq?: number;
+  inactivityPhase: InactivityPhase;
+  lastMovedAt: number;
 };
 
 type PlayersUpdatePayload = {
@@ -42,6 +45,8 @@ type PlayersUpdatePayload = {
     timestamp?: number;
     serverTimeMs?: number;
     lastProcessedInputSeq?: number;
+    inactivityPhase?: InactivityPhase;
+    lastMovedAt?: number;
   }>;
   proximity: Record<string, string[]>;
 };
@@ -156,6 +161,8 @@ export class MultiplayerSystem {
         snapshotSeq: incomingSnapshotSeq,
         serverTimeMs: player.serverTimeMs ?? payload.serverTimeMs,
         lastProcessedInputSeq: player.lastProcessedInputSeq,
+        inactivityPhase: player.inactivityPhase ?? 0,
+        lastMovedAt: player.lastMovedAt ?? Date.now(),
       };
 
       if (clientPlayerId && player.id === clientPlayerId) {

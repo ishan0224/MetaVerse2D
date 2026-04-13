@@ -10,6 +10,7 @@ import {
   subscribeToVoiceControlState,
   type VoiceMode,
 } from '@/game/systems/voiceControlStore';
+import { resetInactivityTimer } from '@/lib/inactivityUiStore';
 import { resetMovementInput } from '@/store/useInputStore';
 
 export function TouchGameplayControls() {
@@ -38,6 +39,7 @@ export function TouchGameplayControls() {
           type="button"
           onClick={() => {
             cycleVoiceMode();
+            resetInactivityTimer('manual-presence');
           }}
           className="min-h-11 min-w-[118px] rounded-xl border border-white/30 bg-black/55 px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em] text-zinc-100 shadow-md backdrop-blur"
         >
@@ -47,6 +49,7 @@ export function TouchGameplayControls() {
           type="button"
           onPointerDown={(event) => {
             event.preventDefault();
+            resetInactivityTimer('ptt');
             setUIPushToTalkPressed(true);
           }}
           onPointerUp={(event) => {

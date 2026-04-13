@@ -7,6 +7,7 @@ import {
   setKeyboardPushToTalkPressed,
   setUIPushToTalkPressed,
 } from '@/game/systems/voiceControlStore';
+import { resetInactivityTimer } from '@/lib/inactivityUiStore';
 
 export function VoiceKeyboardBindings() {
   useEffect(() => {
@@ -17,6 +18,7 @@ export function VoiceKeyboardBindings() {
 
       if (event.code === 'KeyM' && !event.repeat) {
         cycleVoiceMode();
+        resetInactivityTimer('manual-presence');
         return;
       }
 
@@ -24,6 +26,7 @@ export function VoiceKeyboardBindings() {
         return;
       }
 
+      resetInactivityTimer('ptt');
       setKeyboardPushToTalkPressed(true);
     };
 

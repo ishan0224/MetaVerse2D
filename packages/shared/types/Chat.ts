@@ -5,6 +5,8 @@ export const MAX_CHAT_MESSAGES = 20;
 export const MAX_CHAT_TEXT_LENGTH = 240;
 export const CHAT_DRAFT_PLACEHOLDER = 'Message room...';
 
+export type RoomChatMessageKind = 'USER' | 'SYSTEM';
+
 export type RoomChatMessage = {
   id: string;
   roomScopeId: string;
@@ -13,6 +15,7 @@ export type RoomChatMessage = {
   avatarId?: number;
   text: string;
   sentAt: number;
+  kind?: RoomChatMessageKind;
 };
 
 export type RoomChatSendPayload = {

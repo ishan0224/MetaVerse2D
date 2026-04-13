@@ -15,6 +15,7 @@ import {
   normalizeAvatarId,
 } from '@/game/config/characterSpriteConfig';
 import { getRoomChatState, subscribeToRoomChatState } from '@/lib/chatUiStore';
+import { resetInactivityTimer } from '@/lib/inactivityUiStore';
 import { getRuntimeUiState, subscribeToRuntimeUiState } from '@/lib/runtimeUiStore';
 import { getClientPlayerId, sendRoomChatMessage } from '@/network';
 
@@ -159,6 +160,7 @@ export function RoomChatOverlay({ touchOptimized = false }: RoomChatOverlayProps
       return;
     }
 
+    resetInactivityTimer('chat', { forceBroadcast: true });
     setDraftMessage('');
   };
 
@@ -189,27 +191,40 @@ export function RoomChatOverlay({ touchOptimized = false }: RoomChatOverlayProps
                 {messageRows.map((row) => (
                   <li
                     key={row.id}
-                    className={`rounded-md px-2 py-1.5 ${row.isOwnMessage ? 'bg-sky-500/20 text-sky-100' : 'bg-white/5 text-zinc-100'}`}
+                    className={`rounded-md px-2 py-1.5 ${
+                      row.kind === 'SYSTEM'
+                        ? 'border border-amber-200/30 bg-amber-100/70 text-amber-900'
+                        : row.isOwnMessage
+                          ? 'bg-sky-500/20 text-sky-100'
+                          : 'bg-white/5 text-zinc-100'
+                    }`}
                   >
-                    <div className="flex items-start gap-2.5">
-                      <div className="relative h-7 w-7 shrink-0 overflow-hidden rounded-full border border-white/15 bg-zinc-700/70">
-                        {spriteSheetMetrics ? (
-                          <div
-                            className="absolute inset-0"
-                            style={buildAvatarSpriteStyle(row.avatarId, spriteSheetMetrics)}
-                          />
-                        ) : null}
-                        {!spriteSheetMetrics ? (
-                          <div className="flex h-full w-full items-center justify-center text-[11px] font-semibold uppercase text-zinc-100">
-                            {row.senderInitial}
-                          </div>
-                        ) : null}
+                    {row.kind === 'SYSTEM' ? (
+                      <p className="break-words text-xs italic leading-relaxed">
+                        <span className="mr-1 font-semibold not-italic">⚙ System:</span>
+                        {row.text}
+                      </p>
+                    ) : (
+                      <div className="flex items-start gap-2.5">
+                        <div className="relative h-7 w-7 shrink-0 overflow-hidden rounded-full border border-white/15 bg-zinc-700/70">
+                          {spriteSheetMetrics ? (
+                            <div
+                              className="absolute inset-0"
+                              style={buildAvatarSpriteStyle(row.avatarId, spriteSheetMetrics)}
+                            />
+                          ) : null}
+                          {!spriteSheetMetrics ? (
+                            <div className="flex h-full w-full items-center justify-center text-[11px] font-semibold uppercase text-zinc-100">
+                              {row.senderInitial}
+                            </div>
+                          ) : null}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-semibold text-zinc-200">{row.senderName}</p>
+                          <p className="break-words text-xs leading-relaxed">{row.text}</p>
+                        </div>
                       </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-xs font-semibold text-zinc-200">{row.senderName}</p>
-                        <p className="break-words text-xs leading-relaxed">{row.text}</p>
-                      </div>
-                    </div>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -273,6 +288,7 @@ export function RoomChatOverlay({ touchOptimized = false }: RoomChatOverlayProps
 
 type RoomChatMessageRow = {
   id: string;
+  kind: 'USER' | 'SYSTEM';
   senderName: string;
   senderInitial: string;
   avatarId: number | undefined;
@@ -289,6 +305,7 @@ function toRoomChatMessageRow(
 
   return {
     id: message.id,
+    kind: message.kind ?? 'USER',
     senderName: normalizedSenderName,
     senderInitial,
     avatarId: message.avatarId,

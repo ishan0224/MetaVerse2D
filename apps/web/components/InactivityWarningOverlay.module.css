@@ -1,0 +1,247 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(0, 0, 0, 0.85);
+  backdrop-filter: none;
+  animation: inactivityBackdropEnter 200ms ease-out both;
+}
+
+.overlayExiting {
+  animation: inactivityBackdropExit 180ms ease-in both;
+}
+
+.card {
+  width: clamp(340px, 28vw, 420px);
+  border-radius: 16px;
+  border: 0.5px solid rgba(255, 255, 255, 0.12);
+  background: #ffffff;
+  padding: 2rem 2.25rem;
+  text-align: center;
+  animation: inactivityCardEnter 220ms ease-out both;
+}
+
+.cardExiting {
+  animation: inactivityCardExit 160ms ease-in both;
+}
+
+.avatarSlot {
+  --avatar-scale: 4;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: calc(16px * var(--avatar-scale));
+}
+
+.avatarBob {
+  animation: inactivityIdleBob 2.4s ease-in-out infinite;
+}
+
+.avatarScale {
+  transform: scale(var(--avatar-scale));
+  transform-origin: center;
+  filter: grayscale(1);
+  opacity: 0.5;
+}
+
+.avatarSprite,
+.avatarFallback {
+  width: 16px;
+  height: 16px;
+  image-rendering: pixelated;
+}
+
+.avatarFallback {
+  border-radius: 4px;
+  background: #9ca3af;
+}
+
+.title {
+  margin-top: 1.25rem;
+  font-size: 20px;
+  font-weight: 500;
+  line-height: 1.3;
+  color: #111827;
+}
+
+.subtitle {
+  margin: 0.5rem auto 0;
+  max-width: 80%;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #6b7280;
+}
+
+.countdown {
+  margin-top: 1rem;
+  font-size: 48px;
+  font-weight: 500;
+  line-height: 1;
+  color: #e24b4a;
+}
+
+.countdownUrgent {
+  animation: inactivityPulse 0.8s ease-in-out infinite;
+}
+
+.actions {
+  margin-top: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.primaryButton,
+.secondaryButton {
+  width: 100%;
+  height: 44px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 500;
+  transition: opacity 120ms ease-out;
+  touch-action: manipulation;
+}
+
+.primaryButton {
+  border: none;
+  background: #534ab7;
+  color: #ffffff;
+}
+
+.secondaryButton {
+  border: 0.5px solid rgba(0, 0, 0, 0.15);
+  background: transparent;
+  color: #6b7280;
+}
+
+.primaryButton:disabled,
+.secondaryButton:disabled {
+  opacity: 0.75;
+}
+
+@media (max-width: 480px) {
+  .card {
+    width: 88vw;
+    padding: 1.5rem;
+  }
+
+  .avatarSlot {
+    --avatar-scale: 3;
+  }
+
+  .title {
+    font-size: 18px;
+  }
+
+  .countdown {
+    font-size: 40px;
+  }
+}
+
+@media (min-width: 481px) and (max-width: 1024px) {
+  .card {
+    width: clamp(300px, 42vw, 400px);
+    padding: 2rem;
+  }
+
+  .avatarSlot {
+    --avatar-scale: 3.5;
+  }
+
+  .title {
+    font-size: 20px;
+  }
+
+  .countdown {
+    font-size: 48px;
+  }
+}
+
+@media (min-width: 1025px) {
+  .card {
+    width: clamp(340px, 28vw, 420px);
+    padding: 2rem 2.25rem;
+  }
+
+  .avatarSlot {
+    --avatar-scale: 4;
+  }
+
+  .title {
+    font-size: 20px;
+  }
+
+  .countdown {
+    font-size: 48px;
+  }
+}
+
+@keyframes inactivityIdleBob {
+  0%,
+  100% {
+    transform: translateY(0px);
+  }
+
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+@keyframes inactivityPulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@keyframes inactivityBackdropEnter {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes inactivityBackdropExit {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes inactivityCardEnter {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes inactivityCardExit {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  to {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+}
