@@ -12,7 +12,7 @@ It combines a Phaser-powered game client, a Next.js web shell, a Socket.IO autho
 
 ### Desktop Demo
 
-![MetaVerse2D Desktop Demo](./metaverse1.gif)
+![MetaVerse2D Desktop Demo](./metaversedesktop.gif)
 
 ### Mobile/Tablet Demo
 
